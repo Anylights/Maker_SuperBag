@@ -1763,11 +1763,21 @@ local function DrawTileImage(tileImg, x, y)
 end
 
 function DrawMap(viewW, viewH)
-    -- 只绘制可见区域的瓦片
-    local startCol = math.max(1, math.floor(camX / TILE_SIZE))
-    local endCol = math.min(MAP_COLS, math.ceil((camX + viewW) / TILE_SIZE) + 1)
-    local startRow = math.max(1, math.floor(camY / TILE_SIZE))
-    local endRow = math.min(MAP_ROWS, math.ceil((camY + viewH) / TILE_SIZE) + 1)
+    -- 计算 SHOW_ALL 额外可见区域（非16:9屏幕会露出设计分辨率之外的内容）
+    local extraW = (renderOffsetX or 0) / (renderScale or 1)
+    local extraH = (renderOffsetY or 0) / (renderScale or 1)
+
+    -- 先用深色森林背景填充整个可见区域，防止黑边
+    nvgBeginPath(vg)
+    nvgRect(vg, camX - extraW - 1, camY - extraH - 1, viewW + extraW * 2 + 2, viewH + extraH * 2 + 2)
+    nvgFillColor(vg, nvgRGBA(20, 35, 15, 255))
+    nvgFill(vg)
+
+    -- 扩展绘制范围覆盖额外可见区域
+    local startCol = math.max(1, math.floor((camX - extraW) / TILE_SIZE))
+    local endCol = math.min(MAP_COLS, math.ceil((camX + viewW + extraW) / TILE_SIZE) + 1)
+    local startRow = math.max(1, math.floor((camY - extraH) / TILE_SIZE))
+    local endRow = math.min(MAP_ROWS, math.ceil((camY + viewH + extraH) / TILE_SIZE) + 1)
 
     for r = startRow, endRow do
         for c = startCol, endCol do
@@ -2197,8 +2207,10 @@ function DrawFogOfWar(viewW, viewH)
     nvgSave(vg)
 
     -- 外围纯黑(渐变圆之外的区域), 挖掉渐变覆盖的圆
+    local fogExtraW = (renderOffsetX or 0) / (renderScale or 1)
+    local fogExtraH = (renderOffsetY or 0) / (renderScale or 1)
     nvgBeginPath(vg)
-    nvgRect(vg, camX - 20, camY - 20, viewW + 40, viewH + 40)
+    nvgRect(vg, camX - fogExtraW - 20, camY - fogExtraH - 20, viewW + fogExtraW * 2 + 40, viewH + fogExtraH * 2 + 40)
     nvgPathWinding(vg, NVG_HOLE)
     nvgCircle(vg, px, py, oR)
     nvgFillColor(vg, nvgRGBA(0, 0, 0, fogAlpha))

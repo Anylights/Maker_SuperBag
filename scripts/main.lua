@@ -83,6 +83,11 @@ local ENEMY_TYPES = {
 local vg = nil               -- NanoVG 上下文
 local fontNormal = -1
 
+-- 角色图片句柄
+local imgPlayer = -1
+local imgEnemies = {}        -- typeKey → NanoVG image handle
+local gameTimeAcc = 0        -- 累计时间(用于摇摆动画)
+
 local gameState = STATE_PLAYING
 local gameTime = 0            -- 已用时间(秒, 正计时)
 local score = 0
@@ -152,8 +157,8 @@ local HITSTOP_KILL = 0.08    -- 击杀停顿
 local gameTimeScale = 1.0
 
 -- 设计分辨率 (SHOW_ALL 策略, 所有设备看到相同画面)
-local DESIGN_W = 960
-local DESIGN_H = 540
+local DESIGN_W = 1152
+local DESIGN_H = 648
 local renderScale = 1.0       -- 设计→物理的统一缩放比
 local renderOffsetX = 0       -- 居中偏移(letterbox)
 local renderOffsetY = 0
@@ -184,6 +189,61 @@ function Start()
     if fontNormal == -1 then
         print("ERROR: Failed to load font")
     end
+
+    -- 加载角色图片(绿幕抠图后的透明PNG)
+    imgPlayer = nvgCreateImage(vg, "image/wolf_player.png", 0)
+    imgPlayerWhite = nvgCreateImage(vg, "image/wolf_player_white.png", 0)
+    imgEnemies = {
+        patrol = nvgCreateImage(vg, "image/wolf_patrol.png", 0),
+        sentry = nvgCreateImage(vg, "image/wolf_sentry.png", 0),
+        rusher = nvgCreateImage(vg, "image/wolf_rusher.png", 0),
+        heavy  = nvgCreateImage(vg, "image/wolf_heavy.png", 0),
+        elite  = nvgCreateImage(vg, "image/wolf_elite.png", 0),
+        boss   = nvgCreateImage(vg, "image/wolf_boss.png", 0),
+    }
+    imgEnemiesWhite = {
+        patrol = nvgCreateImage(vg, "image/wolf_patrol_white.png", 0),
+        sentry = nvgCreateImage(vg, "image/wolf_sentry_white.png", 0),
+        rusher = nvgCreateImage(vg, "image/wolf_rusher_white.png", 0),
+        heavy  = nvgCreateImage(vg, "image/wolf_heavy_white.png", 0),
+        elite  = nvgCreateImage(vg, "image/wolf_elite_white.png", 0),
+        boss   = nvgCreateImage(vg, "image/wolf_boss_white.png", 0),
+    }
+    -- 加载地形瓦片图片
+    imgFloorTiles = {
+        nvgCreateImage(vg, "image/tiles32/floor_0.png", 0),
+        nvgCreateImage(vg, "image/tiles32/floor_1.png", 0),
+        nvgCreateImage(vg, "image/tiles32/floor_2.png", 0),
+        nvgCreateImage(vg, "image/tiles32/floor_3.png", 0),
+    }
+    imgForestTiles = {
+        nvgCreateImage(vg, "image/tiles32/forest_0.png", 0),
+        nvgCreateImage(vg, "image/tiles32/forest_1.png", 0),
+        nvgCreateImage(vg, "image/tiles32/forest_2.png", 0),
+        nvgCreateImage(vg, "image/tiles32/forest_3.png", 0),
+    }
+    imgDarkTiles = {
+        nvgCreateImage(vg, "image/tiles32/dark_0.png", 0),
+        nvgCreateImage(vg, "image/tiles32/dark_1.png", 0),
+        nvgCreateImage(vg, "image/tiles32/dark_2.png", 0),
+        nvgCreateImage(vg, "image/tiles32/dark_3.png", 0),
+    }
+    imgEdgeTiles = {
+        nvgCreateImage(vg, "image/tiles32/edge_0.png", 0),
+        nvgCreateImage(vg, "image/tiles32/edge_1.png", 0),
+        nvgCreateImage(vg, "image/tiles32/edge_2.png", 0),
+        nvgCreateImage(vg, "image/tiles32/edge_3.png", 0),
+        nvgCreateImage(vg, "image/tiles32/edge_4.png", 0),
+        nvgCreateImage(vg, "image/tiles32/edge_5.png", 0),
+        nvgCreateImage(vg, "image/tiles32/edge_6.png", 0),
+        nvgCreateImage(vg, "image/tiles32/edge_7.png", 0),
+    }
+
+    print("Player image: " .. tostring(imgPlayer))
+    for k, v in pairs(imgEnemies) do
+        print("Enemy image [" .. k .. "]: " .. tostring(v))
+    end
+    print("Tile images loaded: floor=" .. #imgFloorTiles .. " forest=" .. #imgForestTiles .. " dark=" .. #imgDarkTiles .. " edge=" .. #imgEdgeTiles)
 
     SampleInitMouseMode(MM_FREE)
 
@@ -782,6 +842,7 @@ function HandleUpdate(eventType, eventData)
 
     local rawDt = eventData["TimeStep"]:GetFloat()
     local dt = rawDt * gameTimeScale  -- 应用背包慢速
+    gameTimeAcc = gameTimeAcc + rawDt  -- 累计时间(摇摆动画)
     local g = GetGraphics()
     screenW = g:GetWidth()
     screenH = g:GetHeight()
@@ -1692,6 +1753,15 @@ end
 -- ============================================================================
 -- 绘制函数
 -- ============================================================================
+--- 辅助: 用瓦片图片填充一个格子
+local function DrawTileImage(tileImg, x, y)
+    local paint = nvgImagePattern(vg, x, y, TILE_SIZE, TILE_SIZE, 0, tileImg, 1.0)
+    nvgBeginPath(vg)
+    nvgRect(vg, x, y, TILE_SIZE, TILE_SIZE)
+    nvgFillPaint(vg, paint)
+    nvgFill(vg)
+end
+
 function DrawMap(viewW, viewH)
     -- 只绘制可见区域的瓦片
     local startCol = math.max(1, math.floor(camX / TILE_SIZE))
@@ -1705,21 +1775,54 @@ function DrawMap(viewW, viewH)
             local x = (c - 1) * TILE_SIZE
             local y = (r - 1) * TILE_SIZE
 
-            nvgBeginPath(vg)
-            nvgRect(vg, x, y, TILE_SIZE, TILE_SIZE)
-
             if tile == TILE_WALL then
-                nvgFillColor(vg, nvgRGBA(40, 40, 50, 255))
-            elseif tile == TILE_FLOOR then
-                -- 棋盘格纹理
-                if (r + c) % 2 == 0 then
-                    nvgFillColor(vg, nvgRGBA(70, 75, 80, 255))
-                else
-                    nvgFillColor(vg, nvgRGBA(65, 70, 75, 255))
+                -- 墙壁/森林: 三层渐变 edge(紧邻道路) -> forest(间隔一格) -> dark(深处)
+                local hash4 = ((r * 7 + c * 13) % 4) + 1
+                local hash8 = ((r * 7 + c * 13) % 8) + 1
+                -- 检查是否直接相邻道路(上下左右)
+                local adjacentFloor = false
+                local dirs4 = {{-1,0},{1,0},{0,-1},{0,1}}
+                for _, d in ipairs(dirs4) do
+                    local nr, nc = r + d[1], c + d[2]
+                    if nr >= 1 and nr <= MAP_ROWS and nc >= 1 and nc <= MAP_COLS then
+                        if mapData[nr][nc] == TILE_FLOOR or mapData[nr][nc] == TILE_CRATE or mapData[nr][nc] == TILE_EXIT then
+                            adjacentFloor = true
+                            break
+                        end
+                    end
                 end
+                if adjacentFloor then
+                    -- 紧邻道路: 使用edge过渡tile
+                    DrawTileImage(imgEdgeTiles[hash8], x, y)
+                else
+                    -- 检查8方向是否靠近道路(对角线也算)
+                    local nearFloor = false
+                    for dr = -1, 1 do
+                        for dc = -1, 1 do
+                            local nr, nc = r + dr, c + dc
+                            if nr >= 1 and nr <= MAP_ROWS and nc >= 1 and nc <= MAP_COLS then
+                                if mapData[nr][nc] == TILE_FLOOR or mapData[nr][nc] == TILE_CRATE or mapData[nr][nc] == TILE_EXIT then
+                                    nearFloor = true
+                                end
+                            end
+                        end
+                    end
+                    if nearFloor then
+                        -- 对角相邻道路: 使用forest浅森林
+                        DrawTileImage(imgForestTiles[hash4], x, y)
+                    else
+                        -- 远离道路: 使用dark深森林
+                        DrawTileImage(imgDarkTiles[hash4], x, y)
+                    end
+                end
+            elseif tile == TILE_FLOOR then
+                -- 地板: 用棕黄色土路瓦片, 交替使用不同变体
+                local hash = ((r * 7 + c * 13) % 4) + 1
+                DrawTileImage(imgFloorTiles[hash], x, y)
             elseif tile == TILE_CRATE then
-                nvgFillColor(vg, nvgRGBA(65, 70, 75, 255))
-                nvgFill(vg)
+                -- 箱子: 先画地板底色, 再画箱子图标
+                local hash = ((r * 7 + c * 13) % 4) + 1
+                DrawTileImage(imgFloorTiles[hash], x, y)
                 -- 箱子图标
                 nvgBeginPath(vg)
                 local cx = x + TILE_SIZE * 0.15
@@ -1732,16 +1835,35 @@ function DrawMap(viewW, viewH)
                 nvgStrokeColor(vg, nvgRGBA(120, 90, 40, 255))
                 nvgStrokeWidth(vg, 1.5)
                 nvgStroke(vg)
-                goto continue
             elseif tile == TILE_EXIT then
-                -- 撤离点(闪烁绿色)
+                -- 撤离点: 先画地板, 再叠加闪烁绿色半透明层
+                local hash = ((r * 7 + c * 13) % 4) + 1
+                DrawTileImage(imgFloorTiles[hash], x, y)
                 local pulse = math.sin(GetTime():GetElapsedTime() * 3) * 0.3 + 0.7
-                local g = math.floor(180 * pulse)
-                nvgFillColor(vg, nvgRGBA(30, g, 50, 255))
+                local ga = math.floor(120 * pulse)
+                nvgBeginPath(vg)
+                nvgRect(vg, x, y, TILE_SIZE, TILE_SIZE)
+                nvgFillColor(vg, nvgRGBA(30, 200, 50, ga))
+                nvgFill(vg)
             end
-            nvgFill(vg)
-            ::continue::
         end
+    end
+end
+
+--- 绘制纯白描边(用白色剪影图片在8个方向偏移绘制, 形成贴合轮廓的白色描边)
+local function DrawWhiteOutline(whiteImg, halfSize, imgSize)
+    local offDist = 1.5  -- 描边宽度(像素)
+    local dirs = {
+        {1,0}, {-1,0}, {0,1}, {0,-1},
+        {0.707,0.707}, {-0.707,0.707}, {0.707,-0.707}, {-0.707,-0.707},
+    }
+    for _, d in ipairs(dirs) do
+        local ox, oy = d[1] * offDist, d[2] * offDist
+        local paint = nvgImagePattern(vg, -halfSize + ox, -halfSize + oy, imgSize, imgSize, 0, whiteImg, 1.0)
+        nvgBeginPath(vg)
+        nvgRect(vg, -halfSize + ox, -halfSize + oy, imgSize, imgSize)
+        nvgFillPaint(vg, paint)
+        nvgFill(vg)
     end
 end
 
@@ -1757,41 +1879,58 @@ function DrawPlayer()
         alpha = math.floor(math.sin(player.invincibleTimer * 30) * 127 + 128)
     end
 
-    -- 身体
-    nvgBeginPath(vg)
-    nvgCircle(vg, px, py, r)
-    nvgFillColor(vg, nvgRGBA(60, 180, 80, alpha))
-    nvgFill(vg)
-    nvgStrokeColor(vg, nvgRGBA(40, 140, 60, alpha))
-    nvgStrokeWidth(vg, 2)
-    nvgStroke(vg)
+    -- 移动时摇摆动画
+    local isMoving = (input:GetKeyDown(KEY_W) or input:GetKeyDown(KEY_A) or
+                      input:GetKeyDown(KEY_S) or input:GetKeyDown(KEY_D))
+    local wobble = 0
+    if isMoving then
+        wobble = math.sin(gameTimeAcc * 8) * 0.15  -- 左右摇摆 ±0.15 弧度(约8.6度)
+    end
 
-    -- 武器方向线
-    local gunLen = r + 10
-    local gx = px + math.cos(player.angle) * gunLen
-    local gy = py + math.sin(player.angle) * gunLen
-    nvgBeginPath(vg)
-    nvgMoveTo(vg, px + math.cos(player.angle) * r * 0.5, py + math.sin(player.angle) * r * 0.5)
-    nvgLineTo(vg, gx, gy)
-    nvgStrokeColor(vg, nvgRGBA(180, 180, 160, alpha))
-    nvgStrokeWidth(vg, 3)
-    nvgStroke(vg)
+    -- 绘制角色图片
+    local imgSize = r * 2.8  -- 图片绘制尺寸(略大于碰撞圆)
+    local halfSize = imgSize / 2
 
-    -- 枪口小圆
-    nvgBeginPath(vg)
-    nvgCircle(vg, gx, gy, 2.5)
-    nvgFillColor(vg, nvgRGBA(200, 200, 180, alpha))
-    nvgFill(vg)
+    nvgSave(vg)
+    nvgTranslate(vg, px, py)
+    nvgRotate(vg, wobble)
+    nvgGlobalAlpha(vg, alpha / 255)
+
+    if imgPlayer >= 0 then
+        -- 根据朝向水平翻转(角色面朝鼠标方向)
+        local facingRight = (math.cos(player.angle) >= 0)
+        if facingRight then
+            nvgScale(vg, -1, 1)
+        end
+
+        -- 先绘制纯白描边
+        DrawWhiteOutline(imgPlayerWhite, halfSize, imgSize)
+
+        -- 再绘制角色本体
+        local paint = nvgImagePattern(vg, -halfSize, -halfSize, imgSize, imgSize, 0, imgPlayer, 1.0)
+        nvgBeginPath(vg)
+        nvgRect(vg, -halfSize, -halfSize, imgSize, imgSize)
+        nvgFillPaint(vg, paint)
+        nvgFill(vg)
+    else
+        -- 备用：纯色圆形
+        nvgBeginPath(vg)
+        nvgCircle(vg, 0, 0, r)
+        nvgFillColor(vg, nvgRGBA(60, 180, 80, 255))
+        nvgFill(vg)
+    end
+
+    nvgRestore(vg)
 end
 
 function DrawEnemies()
-    for _, e in ipairs(enemies) do
+    for i, e in ipairs(enemies) do
         local alpha = 255
         local isBoss = (e.typeKey == "boss")
 
         if e.hitFlashTimer > 0 then
             alpha = 255
-            -- 受击闪白
+            -- 受击闪白光晕
             nvgBeginPath(vg)
             nvgCircle(vg, e.x, e.y, e.radius + 2)
             nvgFillColor(vg, nvgRGBA(255, 255, 255, 120))
@@ -1800,8 +1939,8 @@ function DrawEnemies()
 
         -- Boss专属: 外圈光环
         if isBoss then
-            local glowPulse = math.sin(GetTime():GetElapsedTime() * 3) * 0.3 + 0.7
-            local glowR = e.radius + 6 + math.sin(GetTime():GetElapsedTime() * 5) * 2
+            local glowPulse = math.sin(gameTimeAcc * 3) * 0.3 + 0.7
+            local glowR = e.radius + 6 + math.sin(gameTimeAcc * 5) * 2
             nvgBeginPath(vg)
             nvgCircle(vg, e.x, e.y, glowR)
             nvgStrokeColor(vg, nvgRGBA(255, 60, 30, math.floor(120 * glowPulse)))
@@ -1817,32 +1956,71 @@ function DrawEnemies()
             end
         end
 
-        -- 身体
-        nvgBeginPath(vg)
-        nvgCircle(vg, e.x, e.y, e.radius)
-        nvgFillColor(vg, nvgRGBA(e.color[1], e.color[2], e.color[3], alpha))
-        nvgFill(vg)
-        nvgStrokeColor(vg, nvgRGBA(
-            math.floor(e.color[1] * 0.7),
-            math.floor(e.color[2] * 0.7),
-            math.floor(e.color[3] * 0.7), alpha))
-        nvgStrokeWidth(vg, isBoss and 2.5 or 1.5)
-        nvgStroke(vg)
+        -- 敌人摇摆动画: 移动中的敌人左右轻摇, 每个敌人相位不同
+        local eMoving = (e.state == "chase" or e.state == "alert" or (e.state == "idle" and e.speed > 0))
+        local eWobble = 0
+        if eMoving then
+            local phase = i * 1.7  -- 每个敌人相位偏移, 避免整齐划一
+            eWobble = math.sin(gameTimeAcc * 7 + phase) * 0.12
+        end
 
-        -- 朝向指示
-        local dx = math.cos(e.angle) * e.radius
-        local dy = math.sin(e.angle) * e.radius
-        nvgBeginPath(vg)
-        nvgCircle(vg, e.x + dx, e.y + dy, 3)
-        nvgFillColor(vg, nvgRGBA(255, 255, 255, 180))
-        nvgFill(vg)
+        -- 选择敌人图片
+        local eImg = imgEnemies[e.typeKey] or imgEnemies["patrol"] or -1
+        local imgSize = e.radius * 2.8
+        local halfSize = imgSize / 2
 
-        -- 血条(受伤时显示)
+        nvgSave(vg)
+        nvgTranslate(vg, e.x, e.y)
+        nvgRotate(vg, eWobble)
+        nvgGlobalAlpha(vg, alpha / 255)
+
+        if eImg >= 0 then
+            -- 根据朝向翻转
+            local facingRight = (math.cos(e.angle) >= 0)
+            if facingRight then
+                nvgScale(vg, -1, 1)
+            end
+
+            -- 先绘制纯白描边
+            local eWhiteImg = imgEnemiesWhite[e.typeKey] or imgEnemiesWhite["patrol"] or -1
+            DrawWhiteOutline(eWhiteImg, halfSize, imgSize)
+
+            -- 再绘制敌人本体
+            local paint = nvgImagePattern(vg, -halfSize, -halfSize, imgSize, imgSize, 0, eImg, 1.0)
+            nvgBeginPath(vg)
+            nvgRect(vg, -halfSize, -halfSize, imgSize, imgSize)
+            nvgFillPaint(vg, paint)
+            nvgFill(vg)
+        else
+            -- 备用: 纯色圆形
+            nvgBeginPath(vg)
+            nvgCircle(vg, 0, 0, e.radius)
+            nvgFillColor(vg, nvgRGBA(e.color[1], e.color[2], e.color[3], 255))
+            nvgFill(vg)
+            nvgStrokeColor(vg, nvgRGBA(
+                math.floor(e.color[1] * 0.7),
+                math.floor(e.color[2] * 0.7),
+                math.floor(e.color[3] * 0.7), 255))
+            nvgStrokeWidth(vg, isBoss and 2.5 or 1.5)
+            nvgStroke(vg)
+        end
+
+        -- 受击闪白覆盖
+        if e.hitFlashTimer > 0 and eImg >= 0 then
+            nvgBeginPath(vg)
+            nvgRect(vg, -halfSize, -halfSize, imgSize, imgSize)
+            nvgFillColor(vg, nvgRGBA(255, 255, 255, 100))
+            nvgFill(vg)
+        end
+
+        nvgRestore(vg)
+
+        -- 血条(受伤时显示) - 不受摇摆影响
         if e.hp < e.maxHp then
             local barW = e.radius * 2.5
             local barH = 3
             local barX = e.x - barW / 2
-            local barY = e.y - e.radius - 8
+            local barY = e.y - e.radius * 1.4 - 8
             local ratio = e.hp / e.maxHp
 
             nvgBeginPath(vg)
@@ -1868,7 +2046,7 @@ function DrawEnemies()
             nvgFontSize(vg, 14)
             nvgTextAlign(vg, NVG_ALIGN_CENTER + NVG_ALIGN_MIDDLE)
             nvgFillColor(vg, nvgRGBA(255, 80, 80, 220))
-            nvgText(vg, e.x, e.y - e.radius - 16, "!", nil)
+            nvgText(vg, e.x, e.y - e.radius * 1.4 - 16, "!", nil)
         end
     end
 end
@@ -2002,8 +2180,8 @@ function DrawDamageNumbers()
 end
 
 function DrawFogOfWar(viewW, viewH)
-    -- 无级渐变战争迷雾: 单个 radialGradient 从透明核心平滑过渡到全黑
-    local fogAlpha = 230
+    -- 无级渐变战争迷雾: 单个 radialGradient 从透明核心平滑过渡到半透明黑暗
+    local fogAlpha = 178  -- ~70% 不透明度, 可以隐约看到视野外的地形
     local innerR = 100     -- 渐变起始(完全透明)
     local outerR = 260     -- 渐变结束(完全黑暗)
 

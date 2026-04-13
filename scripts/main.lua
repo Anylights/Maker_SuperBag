@@ -88,6 +88,12 @@ local imgPlayer = -1
 local imgEnemies = {}        -- typeKey → NanoVG image handle
 local gameTimeAcc = 0        -- 累计时间(用于摇摆动画)
 
+-- 音效
+local sndShoot = nil
+local sndReload = nil
+local sndHit = nil
+local sndKill = nil
+
 local gameState = STATE_PLAYING
 local gameTime = 0            -- 已用时间(秒, 正计时)
 local score = 0
@@ -169,6 +175,19 @@ local function ScreenToDesign(px, py)
 end
 
 -- ============================================================================
+-- 音效播放辅助
+-- ============================================================================
+function PlaySfx(sound, gain)
+    if not sound then return end
+    local node = scene_:CreateChild("SfxNode")
+    local src = node:CreateComponent("SoundSource")
+    src.soundType = "Effect"
+    src.gain = gain or 0.5
+    src.autoRemoveMode = REMOVE_NODE
+    src:Play(sound)
+end
+
+-- ============================================================================
 -- 入口
 -- ============================================================================
 function Start()
@@ -246,6 +265,12 @@ function Start()
     print("Tile images loaded: floor=" .. #imgFloorTiles .. " forest=" .. #imgForestTiles .. " dark=" .. #imgDarkTiles .. " edge=" .. #imgEdgeTiles)
 
     SampleInitMouseMode(MM_FREE)
+
+    -- 加载音效
+    sndShoot = cache:GetResource("Sound", "audio/sfx/sfx_shoot.ogg")
+    sndReload = cache:GetResource("Sound", "audio/sfx/sfx_reload.ogg")
+    sndHit = cache:GetResource("Sound", "audio/sfx/sfx_hit.ogg")
+    sndKill = cache:GetResource("Sound", "audio/sfx/sfx_kill.ogg")
 
     -- 初始化背包系统
     Inv.Init()
@@ -734,6 +759,7 @@ function HandleKeyDown(eventType, eventData)
         if not player.reloading and player.ammo < WEAPON.magSize and player.totalAmmo > 0 then
             player.reloading = true
             player.reloadTimer = WEAPON.reloadTime
+            PlaySfx(sndReload, 0.5)
             print("Reloading...")
         end
     end
@@ -762,6 +788,7 @@ function TryShoot()
         if player.totalAmmo > 0 then
             player.reloading = true
             player.reloadTimer = WEAPON.reloadTime
+            PlaySfx(sndReload, 0.5)
         end
         return
     end
@@ -789,6 +816,8 @@ function TryShoot()
 
     player.ammo = player.ammo - 1
     player.fireTimer = math.max(0.05, WEAPON.fireRate - bonusFireRate)
+
+    PlaySfx(sndShoot, 0.35)
 
     -- 射击后坐力震动(轻微)
     TriggerShake(1.5, 0.06)
@@ -1179,14 +1208,16 @@ function UpdateBullets(dt)
                         size = 10, glow = true, drag = 1.0,
                     })
 
-                    -- 命中震动 + 停顿
+                    -- 命中震动 + 停顿 + 音效
                     TriggerShake(3, 0.1)
                     TriggerHitstop(HITSTOP_HIT)
+                    PlaySfx(sndHit, 0.3)
 
                     if e.hp <= 0 then
-                        -- 敌人死亡 — 更强震动 + 更长停顿
+                        -- 敌人死亡 — 更强震动 + 更长停顿 + 音效
                         TriggerShake(6, 0.15)
                         TriggerHitstop(HITSTOP_KILL)
+                        PlaySfx(sndKill, 0.5)
                         killCount = killCount + 1
                         WM.OnEnemyKilled()
                         score = score + 50

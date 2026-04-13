@@ -1937,6 +1937,35 @@ function DrawPlayer()
     end
 
     nvgRestore(vg)
+
+    -- 换弹环形进度条（世界坐标，不受角色旋转影响）
+    if player.reloading then
+        local progress = 1.0 - (player.reloadTimer / WEAPON.reloadTime)
+        progress = math.max(0, math.min(1, progress))
+
+        local ringRadius = 6
+        local ringY = py - r - 10  -- 头顶上方
+        local lineWidth = 3
+        local startAngle = -math.pi / 2  -- 从12点方向开始
+        local endAngle = startAngle + progress * math.pi * 2
+
+        -- 底圈（暗色）
+        nvgBeginPath(vg)
+        nvgArc(vg, px, ringY, ringRadius, 0, math.pi * 2, NVG_CW)
+        nvgStrokeColor(vg, nvgRGBA(255, 255, 255, 40))
+        nvgStrokeWidth(vg, lineWidth)
+        nvgStroke(vg)
+
+        -- 进度弧（亮色）
+        if progress > 0.01 then
+            nvgBeginPath(vg)
+            nvgArc(vg, px, ringY, ringRadius, startAngle, endAngle, NVG_CW)
+            nvgStrokeColor(vg, nvgRGBA(100, 220, 255, 230))
+            nvgStrokeWidth(vg, lineWidth)
+            nvgLineCap(vg, NVG_ROUND)
+            nvgStroke(vg)
+        end
+    end
 end
 
 function DrawEnemies()

@@ -93,6 +93,12 @@ local sndShoot = nil
 local sndReload = nil
 local sndHit = nil
 local sndKill = nil
+local sndSplat = nil       -- 击杀溅血
+local sndReloadDone = nil   -- 换弹完毕
+local sndFootstep = nil     -- 脚步声
+local sndLevelClear = nil   -- 过关成功
+local footstepTimer = 0     -- 脚步声计时器
+local audioScene = nil  -- 音频专用场景
 
 local gameState = STATE_PLAYING
 local gameTime = 0            -- 已用时间(秒, 正计时)
@@ -179,7 +185,8 @@ end
 -- ============================================================================
 function PlaySfx(sound, gain)
     if not sound then return end
-    local node = scene_:CreateChild("SfxNode")
+    if not audioScene then return end
+    local node = audioScene:CreateChild("SfxNode")
     local src = node:CreateComponent("SoundSource")
     src.soundType = "Effect"
     src.gain = gain or 0.5
@@ -267,10 +274,18 @@ function Start()
     SampleInitMouseMode(MM_FREE)
 
     -- 加载音效
+    -- 创建音频专用场景（纯NanoVG游戏无3D场景，需独立Scene播放音效）
+    audioScene = Scene()
+    audioScene:CreateComponent("Octree")
+
     sndShoot = cache:GetResource("Sound", "audio/sfx/sfx_shoot.ogg")
     sndReload = cache:GetResource("Sound", "audio/sfx/sfx_reload.ogg")
     sndHit = cache:GetResource("Sound", "audio/sfx/sfx_hit.ogg")
     sndKill = cache:GetResource("Sound", "audio/sfx/sfx_kill.ogg")
+    sndSplat = cache:GetResource("Sound", "audio/sfx/sfx_splat.ogg")
+    sndReloadDone = cache:GetResource("Sound", "audio/sfx/sfx_reload_done.ogg")
+    sndFootstep = cache:GetResource("Sound", "audio/sfx/sfx_footstep.ogg")
+    sndLevelClear = cache:GetResource("Sound", "audio/sfx/sfx_level_clear.ogg")
 
     -- 初始化背包系统
     Inv.Init()
@@ -951,6 +966,7 @@ function HandleUpdate(eventType, eventData)
         if WM.phase == WM.PHASE_VICTORY then
             gameState = STATE_VICTORY
         end
+        PlaySfx(sndLevelClear, 0.6)
     end
 
     -- 持续射击(按住左键, 背包打开时禁止射击)
@@ -1049,6 +1065,17 @@ function UpdatePlayer(dt)
     newX = math.max(player.radius, math.min(MAP_W - player.radius, newX))
     newY = math.max(player.radius, math.min(MAP_H - player.radius, newY))
 
+    -- 移动脚步声
+    if dx ~= 0 or dy ~= 0 then
+        footstepTimer = footstepTimer - dt
+        if footstepTimer <= 0 then
+            PlaySfx(sndFootstep, 0.25)
+            footstepTimer = 0.3  -- 每0.3秒一步
+        end
+    else
+        footstepTimer = 0  -- 停下时重置，起步立刻有声
+    end
+
     -- 移动脚步尘土
     if dx ~= 0 or dy ~= 0 then
         if math.random() < 0.3 then  -- 30%概率每帧产生
@@ -1088,6 +1115,7 @@ function UpdatePlayer(dt)
         player.reloadTimer = player.reloadTimer - dt
         if player.reloadTimer <= 0 then
             player.reloading = false
+            PlaySfx(sndReloadDone, 0.5)
             local effectiveMag = WEAPON.magSize + WM.weaponMods.bonusMagSize
             local need = effectiveMag - player.ammo
             local give = math.min(need, player.totalAmmo)
@@ -1218,6 +1246,7 @@ function UpdateBullets(dt)
                         TriggerShake(6, 0.15)
                         TriggerHitstop(HITSTOP_KILL)
                         PlaySfx(sndKill, 0.5)
+                        PlaySfx(sndSplat, 0.4)
                         killCount = killCount + 1
                         WM.OnEnemyKilled()
                         score = score + 50

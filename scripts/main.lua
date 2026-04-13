@@ -1,6 +1,6 @@
 -- ============================================================================
--- 《鸭巢行动》 Operation Nest
--- 2D俯视角PVE搜打撤射击游戏 - MVP Phase 1
+-- 《小狼救红帽》 Little Wolf's Rescue
+-- 2D俯视角PVE射击游戏 - 小狼深入森林拯救小红帽
 -- 玩家移动(WASD) + 鼠标瞄准射击 + 子弹系统 + 3种敌人 + 地图 + 战争迷雾 + HUD
 -- ============================================================================
 
@@ -38,7 +38,7 @@ local STATE_VICTORY = "victory"      -- 全部通关
 
 -- 武器数据
 local WEAPON = {
-    name = "手枪",
+    name = "弹弓",
     damage = 25,
     fireRate = 0.2,          -- 射击间隔(秒) — 稍快连射
     bulletSpeed = 1000,      -- 子弹速度(像素/秒) — 大幅提升
@@ -55,21 +55,21 @@ local TRAIL_MAX = 6
 -- 敌人类型数据
 local ENEMY_TYPES = {
     patrol = {
-        name = "巡逻兵",
+        name = "灰狼巡逻",
         hp = 50, speed = 60, damage = 10, radius = 12,
         color = {200, 80, 80},
         sightRange = 200, attackRange = 180, attackRate = 0.8,
         bulletSpeed = 350,
     },
     sentry = {
-        name = "哨兵",
+        name = "灰狼哨兵",
         hp = 40, speed = 0, damage = 15, radius = 14,
         color = {80, 80, 200},
         sightRange = 280, attackRange = 260, attackRate = 1.2,
         bulletSpeed = 400,
     },
     rusher = {
-        name = "冲锋者",
+        name = "灰狼突击",
         hp = 60, speed = 140, damage = 20, radius = 10,
         color = {200, 160, 40},
         sightRange = 160, attackRange = 30, attackRate = 0.5,
@@ -265,7 +265,7 @@ function Start()
     waveAnnounceTimer = 3.0
     waveAnnounceText = "Wave " .. WM.currentWave .. " - " .. (w1 and w1.name or "")
 
-    print("=== 鸭巢行动 - 波次挑战模式 ===")
+    print("=== 小狼救红帽 - 森林冒险模式 ===")
     print("WASD移动, 鼠标瞄准, 左键射击, R换弹")
     print("消灭所有敌人进入下一波!")
 
@@ -2269,7 +2269,7 @@ function DrawSearchProgress()
     nvgFontSize(vg, 11)
     nvgTextAlign(vg, NVG_ALIGN_CENTER + NVG_ALIGN_MIDDLE)
     nvgFillColor(vg, nvgRGBA(255, 255, 255, 220))
-    nvgText(vg, cx, cy - 28, "搜刮中...", nil)
+    nvgText(vg, cx, cy - 28, "搜索中...", nil)
 end
 
 -- ============================================================================
@@ -2291,7 +2291,7 @@ function DrawWaveCleared(w, h)
     local pulse = math.sin(GetTime():GetElapsedTime() * 5) * 0.2 + 0.8
     nvgFontSize(vg, 36)
     nvgFillColor(vg, nvgRGBA(80, 255, 120, math.floor(255 * pulse)))
-    nvgText(vg, w / 2, h / 2 - 20, "区域清除!", nil)
+    nvgText(vg, w / 2, h / 2 - 20, "敌人已清除!", nil)
 
     -- 副标题
     local wave = WM.GetCurrentWave()
@@ -2327,7 +2327,7 @@ function DrawRewardScreen(w, h)
         -- 补给奖励: 自动获得
         nvgFontSize(vg, 28)
         nvgFillColor(vg, nvgRGBA(100, 220, 255, 255))
-        nvgText(vg, w / 2, h / 2 - 40, "补给到达!", nil)
+        nvgText(vg, w / 2, h / 2 - 40, "发现补给!", nil)
 
         nvgFontSize(vg, 16)
         nvgFillColor(vg, nvgRGBA(200, 220, 200, 220))
@@ -2340,7 +2340,7 @@ function DrawRewardScreen(w, h)
         -- 三选一奖励
         nvgFontSize(vg, 26)
         nvgFillColor(vg, nvgRGBA(255, 220, 80, 255))
-        nvgText(vg, w / 2, h * 0.18, "选择强化", nil)
+        nvgText(vg, w / 2, h * 0.18, "选择装备强化", nil)
 
         nvgFontSize(vg, 13)
         nvgFillColor(vg, nvgRGBA(180, 180, 180, 200))
@@ -2795,14 +2795,14 @@ function DrawEndScreen(w, h)
     if isVictory then
         local pulse = math.sin(GetTime():GetElapsedTime() * 3) * 0.15 + 0.85
         nvgFillColor(vg, nvgRGBA(255, 220, 60, math.floor(255 * pulse)))
-        nvgText(vg, w / 2, panelY + 42, "任务完成!", nil)
+        nvgText(vg, w / 2, panelY + 42, "小红帽获救!", nil)
         -- 副标题
         nvgFontSize(vg, 15)
         nvgFillColor(vg, nvgRGBA(180, 220, 255, 220))
-        nvgText(vg, w / 2, panelY + 68, "鸭巢已被彻底摧毁", nil)
+        nvgText(vg, w / 2, panelY + 68, "大灰狼集团已被击溃!", nil)
     else
         nvgFillColor(vg, nvgRGBA(255, 80, 80, 255))
-        nvgText(vg, w / 2, panelY + 45, "阵亡", nil)
+        nvgText(vg, w / 2, panelY + 45, "小狼倒下了...", nil)
         -- 失败时显示波次进度
         nvgFontSize(vg, 14)
         nvgFillColor(vg, nvgRGBA(180, 180, 180, 200))
@@ -2814,19 +2814,19 @@ function DrawEndScreen(w, h)
     local statY = isVictory and (panelY + 100) or (panelY + 100)
     nvgFontSize(vg, 16)
     nvgFillColor(vg, nvgRGBA(220, 220, 220, 255))
-    nvgText(vg, w / 2, statY, "击杀: " .. killCount, nil)
+    nvgText(vg, w / 2, statY, "击退灰狼: " .. killCount, nil)
     nvgText(vg, w / 2, statY + 25, "分数: " .. score, nil)
 
     local survMin = math.floor(gameTime / 60)
     local survSec = math.floor(gameTime % 60)
     nvgText(vg, w / 2, statY + 50,
-        string.format("用时: %d:%02d", survMin, survSec), nil)
+        string.format("冒险用时: %d:%02d", survMin, survSec), nil)
 
     if isVictory then
         -- 额外显示获得的强化
         local modsText = {}
         if WM.weaponMods.bonusDamage > 0 then
-            table.insert(modsText, "伤害+" .. WM.weaponMods.bonusDamage)
+            table.insert(modsText, "攻击+" .. WM.weaponMods.bonusDamage)
         end
         if WM.weaponMods.bonusMagSize > 0 then
             table.insert(modsText, "弹匣+" .. WM.weaponMods.bonusMagSize)
@@ -2835,7 +2835,7 @@ function DrawEndScreen(w, h)
             nvgFontSize(vg, 13)
             nvgFillColor(vg, nvgRGBA(160, 220, 255, 200))
             nvgText(vg, w / 2, statY + 78,
-                "强化: " .. table.concat(modsText, "  "), nil)
+                "获得强化: " .. table.concat(modsText, "  "), nil)
         end
     end
 
@@ -2843,5 +2843,5 @@ function DrawEndScreen(w, h)
     nvgFontSize(vg, 14)
     nvgFillColor(vg, nvgRGBA(160, 160, 160, 200))
     local bottomY = panelY + panelH - 30
-    nvgText(vg, w / 2, bottomY, "点击任意处重新开始", nil)
+    nvgText(vg, w / 2, bottomY, "点击任意处再次出发", nil)
 end

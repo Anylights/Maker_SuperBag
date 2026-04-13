@@ -22,8 +22,8 @@ WM.PHASE_VICTORY   = "victory"    -- 全部通关
 WM.WAVES = {
     -- Wave 1: 新手引导 (只有巡逻兵, 少量)
     {
-        name = "鸭巢外围",
-        desc = "清除外围哨所的敌人",
+        name = "森林入口",
+        desc = "小狼踏入黑暗森林",
         type = "combat",
         enemyCount = 6,
         rooms = 8,
@@ -35,8 +35,8 @@ WM.WAVES = {
     },
     -- Wave 2: 引入哨兵
     {
-        name = "地下通道",
-        desc = "穿越地下防御通道",
+        name = "密林小径",
+        desc = "穿越大灰狼的巡逻区",
         type = "combat",
         enemyCount = 9,
         rooms = 10,
@@ -48,8 +48,8 @@ WM.WAVES = {
     },
     -- Wave 3: 引入冲锋者
     {
-        name = "补给仓库",
-        desc = "攻占敌方补给点",
+        name = "灰狼哨站",
+        desc = "攻破灰狼集团的前哨",
         type = "combat",
         enemyCount = 11,
         rooms = 10,
@@ -61,8 +61,8 @@ WM.WAVES = {
     },
     -- Wave 4: 精英波 (强化敌人, 少量)
     {
-        name = "精英防线",
-        desc = "遭遇精锐守卫!",
+        name = "狼群伏击",
+        desc = "遭遇灰狼精锐!",
         type = "elite",
         enemyCount = 7,
         rooms = 8,
@@ -74,8 +74,8 @@ WM.WAVES = {
     },
     -- Wave 5: 大规模战斗
     {
-        name = "核心区域",
-        desc = "深入鸭巢核心",
+        name = "外婆家附近",
+        desc = "深入灰狼集团腹地",
         type = "combat",
         enemyCount = 14,
         rooms = 12,
@@ -87,8 +87,8 @@ WM.WAVES = {
     },
     -- Wave 6: 高难度混合
     {
-        name = "指挥中心",
-        desc = "摧毁敌军指挥系统",
+        name = "灰狼营地",
+        desc = "捣毁灰狼集团的巢穴",
         type = "combat",
         enemyCount = 16,
         rooms = 12,
@@ -100,8 +100,8 @@ WM.WAVES = {
     },
     -- Wave 7: Boss前哨
     {
-        name = "机密实验室",
-        desc = "最后的防线...",
+        name = "囚禁之地",
+        desc = "小红帽就在前方...",
         type = "elite",
         enemyCount = 10,
         rooms = 10,
@@ -113,8 +113,8 @@ WM.WAVES = {
     },
     -- Wave 8: Boss战
     {
-        name = "鸭巢之主",
-        desc = "击败最终Boss!",
+        name = "大灰狼首领",
+        desc = "击败大灰狼, 救出小红帽!",
         type = "boss",
         enemyCount = 4,  -- 少量小兵 + Boss
         rooms = 6,
@@ -131,23 +131,23 @@ WM.WAVES = {
 -- ============================================================================
 WM.REWARD_POOL = {
     -- 每个奖励: {id, name, desc, apply}
-    { id = "ammo_pack",   name = "弹药补给",   desc = "+30 弹药",
+    { id = "ammo_pack",   name = "石弹补给",   desc = "+30 弹药",
       icon = "ammo", apply = function(p) p.totalAmmo = p.totalAmmo + 30 end },
-    { id = "heal_kit",    name = "急救包",     desc = "回复 40 HP",
+    { id = "heal_kit",    name = "草药包",     desc = "回复 40 HP",
       icon = "health", apply = function(p) p.hp = math.min(p.maxHp, p.hp + 40) end },
-    { id = "max_hp_up",   name = "强化体质",   desc = "最大HP +15",
+    { id = "max_hp_up",   name = "狼族血脉",   desc = "最大HP +15",
       icon = "shield", apply = function(p) p.maxHp = p.maxHp + 15; p.hp = p.hp + 15 end },
-    { id = "dmg_up",      name = "穿甲弹头",   desc = "伤害 +8",
+    { id = "dmg_up",      name = "利爪强化",   desc = "伤害 +8",
       icon = "damage", apply = function(p) end },  -- 通过weapon modifier实现
-    { id = "speed_up",    name = "轻量装甲",   desc = "移速 +20",
+    { id = "speed_up",    name = "疾风步法",   desc = "移速 +20",
       icon = "speed", apply = function(p) p.speed = p.speed + 20 end },
-    { id = "mag_up",      name = "扩容弹匣",   desc = "弹匣 +4",
+    { id = "mag_up",      name = "大容量弹袋",   desc = "弹匣 +4",
       icon = "mag", apply = function(p) end },  -- 通过weapon modifier实现
-    { id = "fire_rate",   name = "快速扳机",   desc = "射速提升",
+    { id = "fire_rate",   name = "连射技巧",   desc = "射速提升",
       icon = "rate", apply = function(p) end },
-    { id = "full_ammo",   name = "弹药箱",     desc = "弹药全满",
+    { id = "full_ammo",   name = "弹药宝箱",   desc = "弹药全满",
       icon = "ammo", apply = function(p) p.totalAmmo = p.totalAmmo + 60 end },
-    { id = "full_heal",   name = "医疗箱",     desc = "HP全满",
+    { id = "full_heal",   name = "长老秘药",   desc = "HP全满",
       icon = "health", apply = function(p) p.hp = p.maxHp end },
 }
 
@@ -386,9 +386,9 @@ end
 function WM.GenerateSupplyReward()
     -- 补给: 固定给弹药+血
     WM.rewardChoices = {
-        { id = "supply_ammo", name = "弹药补给", desc = "+25 弹药",
+        { id = "supply_ammo", name = "石弹补给", desc = "+25 弹药",
           icon = "ammo", apply = function(p) p.totalAmmo = p.totalAmmo + 25 end },
-        { id = "supply_heal", name = "战地急救", desc = "回复 30 HP",
+        { id = "supply_heal", name = "森林草药", desc = "回复 30 HP",
           icon = "health", apply = function(p) p.hp = math.min(p.maxHp, p.hp + 30) end },
     }
     -- 补给型自动全选(不需要选择)
@@ -463,7 +463,7 @@ end
 -- Boss 数据
 -- ============================================================================
 WM.BOSS_DATA = {
-    name = "鸭巢指挥官",
+    name = "大灰狼首领",
     hp = 500,
     speed = 50,
     damage = 30,

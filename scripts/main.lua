@@ -1602,6 +1602,12 @@ function HandleNanoVGRender(eventType, eventData)
 
     nvgBeginFrame(vg, screenW, screenH, 1.0)
 
+    -- 用深色森林填充整个屏幕，防止非16:9屏幕出现黑边
+    nvgBeginPath(vg)
+    nvgRect(vg, 0, 0, screenW, screenH)
+    nvgFillColor(vg, nvgRGBA(20, 35, 15, 255))
+    nvgFill(vg)
+
     -- 世界空间 (设计分辨率缩放 + 相机偏移 + 震动)
     nvgSave(vg)
     nvgTranslate(vg, renderOffsetX, renderOffsetY)

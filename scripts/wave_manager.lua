@@ -10,6 +10,8 @@ local WM = {}
 -- ============================================================================
 WM.PHASE_COMBAT    = "combat"     -- 战斗中(清除所有敌人)
 WM.PHASE_CLEARED   = "cleared"    -- 波次刚清完(短暂展示)
+WM.PHASE_EXIT_OPEN = "exit_open"  -- 出口已开放(玩家需走到出口)
+WM.PHASE_WALKOUT   = "walkout"    -- 走出动画(玩家自动移向出口)
 WM.PHASE_REWARD    = "reward"     -- 选择奖励
 WM.PHASE_TRANSIT   = "transit"    -- 过渡到下一波(地图重生中)
 WM.PHASE_BOSS      = "boss"       -- Boss战
@@ -25,12 +27,12 @@ WM.WAVES = {
         name = "森林入口",
         desc = "小狼踏入黑暗森林",
         type = "combat",
-        enemyCount = 6,
-        rooms = 8,
-        mapSize = {cols = 30, rows = 22},
+        enemyCount = 7,
+        rooms = 10,
+        mapSize = {cols = 50, rows = 36},
         weights = { patrol = 100, sentry = 0, rusher = 0 },
-        hpMult = 0.8,
-        dmgMult = 0.7,
+        hpMult = 0.7,
+        dmgMult = 0.6,
         rewardType = "choice",  -- 三选一奖励
     },
     -- Wave 2: 引入哨兵
@@ -39,10 +41,10 @@ WM.WAVES = {
         desc = "穿越大灰狼的巡逻区",
         type = "combat",
         enemyCount = 9,
-        rooms = 10,
-        mapSize = {cols = 35, rows = 25},
+        rooms = 12,
+        mapSize = {cols = 55, rows = 40},
         weights = { patrol = 60, sentry = 40, rusher = 0 },
-        hpMult = 1.0,
+        hpMult = 0.9,
         dmgMult = 0.8,
         rewardType = "supply",  -- 补给(弹药+血)
     },
@@ -52,24 +54,24 @@ WM.WAVES = {
         desc = "攻破灰狼集团的前哨",
         type = "combat",
         enemyCount = 11,
-        rooms = 10,
-        mapSize = {cols = 35, rows = 25},
+        rooms = 14,
+        mapSize = {cols = 60, rows = 42},
         weights = { patrol = 40, sentry = 30, rusher = 30 },
         hpMult = 1.0,
         dmgMult = 1.0,
         rewardType = "choice",
     },
-    -- Wave 4: 精英波 (强化敌人, 少量)
+    -- Wave 4: 引入重装兵(中等强化, 平滑过渡)
     {
         name = "狼群伏击",
         desc = "遭遇灰狼精锐!",
         type = "elite",
-        enemyCount = 7,
-        rooms = 8,
-        mapSize = {cols = 30, rows = 22},
-        weights = { patrol = 20, sentry = 40, rusher = 40 },
-        hpMult = 1.8,
-        dmgMult = 1.4,
+        enemyCount = 8,
+        rooms = 12,
+        mapSize = {cols = 55, rows = 40},
+        weights = { patrol = 15, sentry = 30, rusher = 35, heavy = 20 },
+        hpMult = 1.3,
+        dmgMult = 1.1,
         rewardType = "choice",
     },
     -- Wave 5: 大规模战斗
@@ -78,11 +80,11 @@ WM.WAVES = {
         desc = "深入灰狼集团腹地",
         type = "combat",
         enemyCount = 14,
-        rooms = 12,
-        mapSize = {cols = 40, rows = 30},
-        weights = { patrol = 35, sentry = 35, rusher = 30 },
-        hpMult = 1.2,
-        dmgMult = 1.1,
+        rooms = 16,
+        mapSize = {cols = 65, rows = 48},
+        weights = { patrol = 25, sentry = 25, rusher = 30, heavy = 20 },
+        hpMult = 1.3,
+        dmgMult = 1.2,
         rewardType = "supply",
     },
     -- Wave 6: 高难度混合
@@ -91,35 +93,35 @@ WM.WAVES = {
         desc = "捣毁灰狼集团的巢穴",
         type = "combat",
         enemyCount = 16,
-        rooms = 12,
-        mapSize = {cols = 40, rows = 30},
-        weights = { patrol = 30, sentry = 30, rusher = 40 },
-        hpMult = 1.4,
+        rooms = 16,
+        mapSize = {cols = 65, rows = 48},
+        weights = { patrol = 15, sentry = 25, rusher = 35, heavy = 25 },
+        hpMult = 1.5,
         dmgMult = 1.3,
         rewardType = "choice",
     },
-    -- Wave 7: Boss前哨
+    -- Wave 7: Boss前哨 (给玩家一波补给准备)
     {
         name = "囚禁之地",
         desc = "小红帽就在前方...",
         type = "elite",
         enemyCount = 10,
-        rooms = 10,
-        mapSize = {cols = 35, rows = 25},
-        weights = { patrol = 20, sentry = 30, rusher = 50 },
-        hpMult = 1.6,
-        dmgMult = 1.5,
-        rewardType = "supply",
+        rooms = 14,
+        mapSize = {cols = 60, rows = 42},
+        weights = { patrol = 10, sentry = 25, rusher = 40, heavy = 25 },
+        hpMult = 1.5,
+        dmgMult = 1.4,
+        rewardType = "choice",
     },
     -- Wave 8: Boss战
     {
         name = "大灰狼首领",
         desc = "击败大灰狼, 救出小红帽!",
         type = "boss",
-        enemyCount = 4,  -- 少量小兵 + Boss
-        rooms = 6,
-        mapSize = {cols = 25, rows = 20},
-        weights = { patrol = 50, sentry = 50, rusher = 0 },
+        enemyCount = 5,  -- 少量小兵 + Boss
+        rooms = 8,
+        mapSize = {cols = 45, rows = 35},
+        weights = { patrol = 40, sentry = 40, rusher = 20 },
         hpMult = 1.0,
         dmgMult = 1.0,
         rewardType = "none",
@@ -183,6 +185,13 @@ WM.rewardConfirmed = false    -- 是否已确认选择
 WM.boss = nil                 -- Boss实例引用
 WM.bossSpawnTimer = 0         -- Boss召唤小兵冷却
 
+-- 出口系统
+WM.exitX = 0                  -- 出口中心世界坐标X
+WM.exitY = 0                  -- 出口中心世界坐标Y
+WM.exitReady = false          -- 出口是否已生成
+WM.walkoutTimer = 0           -- 走出动画计时器
+WM.walkoutDuration = 1.2      -- 走出动画持续时间(秒)
+
 -- 动态难度
 WM.difficultyMod = 1.0        -- 难度修正系数
 
@@ -205,6 +214,10 @@ function WM.Init()
     WM.rewardConfirmed = false
     WM.boss = nil
     WM.bossSpawnTimer = 0
+    WM.exitX = 0
+    WM.exitY = 0
+    WM.exitReady = false
+    WM.walkoutTimer = 0
     WM.difficultyMod = 1.0
     WM.weaponMods = {
         bonusDamage = 0,
@@ -260,14 +273,16 @@ function WM.RollEnemyType()
     if not wave then return "patrol" end
 
     local w = wave.weights
-    local total = (w.patrol or 0) + (w.sentry or 0) + (w.rusher or 0)
+    local total = (w.patrol or 0) + (w.sentry or 0) + (w.rusher or 0) + (w.heavy or 0)
     if total <= 0 then return "patrol" end
 
     local roll = math.random(1, total)
     if roll <= (w.patrol or 0) then return "patrol" end
     roll = roll - (w.patrol or 0)
     if roll <= (w.sentry or 0) then return "sentry" end
-    return "rusher"
+    roll = roll - (w.sentry or 0)
+    if roll <= (w.rusher or 0) then return "rusher" end
+    return "heavy"
 end
 
 -- ============================================================================
@@ -464,7 +479,7 @@ end
 -- ============================================================================
 WM.BOSS_DATA = {
     name = "大灰狼首领",
-    hp = 500,
+    hp = 600,
     speed = 50,
     damage = 30,
     radius = 24,
@@ -478,6 +493,13 @@ WM.BOSS_DATA = {
     summonCount = 2,         -- 每次召唤2个
     chargeSpeed = 280,       -- 冲锋速度
     chargeCooldown = 6.0,    -- 冲锋冷却
+    -- 新攻击模式
+    shotgunPellets = 5,      -- 散弹弹丸数
+    shotgunSpread = 0.5,     -- 散弹扇形角度
+    spinBullets = 8,         -- 旋转弹幕每轮弹数
+    spinInterval = 0.3,      -- 旋转弹幕发射间隔
+    shieldCooldown = 10.0,   -- 护盾冷却
+    shieldDuration = 3.0,    -- 护盾持续
 }
 
 function WM.CreateBoss(x, y)
@@ -513,6 +535,18 @@ function WM.CreateBoss(x, y)
         chargeTargetY = 0,
         chargeDuration = 0,
         phaseIndex = 1,  -- Boss阶段(根据血量)
+        -- 新攻击模式
+        attackPattern = "single",  -- 当前攻击模式(会随阶段变化)
+        shotgunPellets = bd.shotgunPellets,
+        shotgunSpread = bd.shotgunSpread,
+        spinTimer = 0,             -- 旋转弹幕计时
+        spinAngle = 0,             -- 旋转弹幕当前角度
+        isSpinning = false,        -- 是否正在释放旋转弹幕
+        spinRounds = 0,            -- 剩余旋转轮数
+        shieldTimer = bd.shieldCooldown,
+        shieldActive = false,
+        shieldDuration = 0,
+        armor = 0,
     }
     return WM.boss
 end
@@ -532,24 +566,34 @@ function WM.UpdateBossBehavior(boss, dt, playerX, playerY)
 
     local phase = WM.GetBossPhase(boss)
     boss.phaseIndex = phase
+    local bd = WM.BOSS_DATA
+
+    -- 攻击模式随阶段变化
+    if phase == 1 then
+        boss.attackPattern = "single"
+    elseif phase == 2 then
+        boss.attackPattern = "shotgun"  -- 阶段2: 散弹
+    else
+        boss.attackPattern = "shotgun"  -- 阶段3: 散弹+旋转弹幕
+    end
 
     -- 召唤小兵
     boss.summonTimer = boss.summonTimer - dt
-    local summonInterval = WM.BOSS_DATA.summonInterval
+    local summonInterval = bd.summonInterval
     if phase >= 2 then summonInterval = summonInterval * 0.7 end
     if phase >= 3 then summonInterval = summonInterval * 0.5 end
 
     local summoned = nil
     if boss.summonTimer <= 0 then
         boss.summonTimer = summonInterval
-        local count = WM.BOSS_DATA.summonCount
+        local count = bd.summonCount
         if phase >= 3 then count = count + 1 end
         summoned = { count = count }
     end
 
     -- 冲锋攻击
     boss.chargeTimer = boss.chargeTimer - dt
-    if boss.chargeTimer <= 0 and not boss.isCharging then
+    if boss.chargeTimer <= 0 and not boss.isCharging and not boss.isSpinning then
         local dx = playerX - boss.x
         local dy = playerY - boss.y
         local dist = math.sqrt(dx * dx + dy * dy)
@@ -558,30 +602,91 @@ function WM.UpdateBossBehavior(boss, dt, playerX, playerY)
             boss.chargeTargetX = playerX
             boss.chargeTargetY = playerY
             boss.chargeDuration = 0.6
-            boss.chargeTimer = WM.BOSS_DATA.chargeCooldown
+            boss.chargeTimer = bd.chargeCooldown
             if phase >= 2 then boss.chargeTimer = boss.chargeTimer * 0.7 end
         end
     end
 
     -- 执行冲锋
+    local chargeImpact = nil
     if boss.isCharging then
         boss.chargeDuration = boss.chargeDuration - dt
         local angle = math.atan(boss.chargeTargetY - boss.y, boss.chargeTargetX - boss.x)
-        local spd = WM.BOSS_DATA.chargeSpeed
+        local spd = bd.chargeSpeed
         if phase >= 3 then spd = spd * 1.3 end
         boss.x = boss.x + math.cos(angle) * spd * dt
         boss.y = boss.y + math.sin(angle) * spd * dt
         if boss.chargeDuration <= 0 then
             boss.isCharging = false
+            -- 冲锋结束释放冲击波(阶段2+)
+            if phase >= 2 then
+                chargeImpact = { x = boss.x, y = boss.y, radius = 60, damage = 15 }
+            end
+        end
+    end
+
+    -- 旋转弹幕(阶段3专属)
+    local spinBullets = nil
+    if phase >= 3 and not boss.isSpinning and not boss.isCharging then
+        boss.spinTimer = boss.spinTimer - dt
+        if boss.spinTimer <= 0 then
+            boss.isSpinning = true
+            boss.spinRounds = 5  -- 旋转5轮
+            boss.spinTimer = bd.spinInterval
+            boss.spinAngle = boss.spinAngle or 0
+        end
+    end
+    if boss.isSpinning then
+        boss.spinTimer = boss.spinTimer - dt
+        if boss.spinTimer <= 0 then
+            boss.spinTimer = bd.spinInterval
+            boss.spinRounds = boss.spinRounds - 1
+            -- 发射一圈均匀分布的子弹
+            local n = bd.spinBullets
+            spinBullets = {}
+            for p = 1, n do
+                local a = boss.spinAngle + (p - 1) * (math.pi * 2 / n)
+                table.insert(spinBullets, {
+                    x = boss.x + math.cos(a) * (boss.radius + 4),
+                    y = boss.y + math.sin(a) * (boss.radius + 4),
+                    vx = math.cos(a) * bd.bulletSpeed * 0.8,
+                    vy = math.sin(a) * bd.bulletSpeed * 0.8,
+                    damage = math.floor(bd.damage * 0.6),
+                })
+            end
+            boss.spinAngle = boss.spinAngle + 0.3  -- 每轮旋转偏移
+            if boss.spinRounds <= 0 then
+                boss.isSpinning = false
+                boss.spinTimer = 5.0  -- 旋转弹幕冷却
+            end
+        end
+    end
+
+    -- 护盾(阶段3: 周期性获得护甲)
+    if phase >= 3 then
+        if not boss.shieldActive then
+            boss.shieldTimer = boss.shieldTimer - dt
+            if boss.shieldTimer <= 0 then
+                boss.shieldActive = true
+                boss.shieldDuration = bd.shieldDuration
+                boss.armor = 0.5  -- 50%减伤
+            end
+        else
+            boss.shieldDuration = boss.shieldDuration - dt
+            if boss.shieldDuration <= 0 then
+                boss.shieldActive = false
+                boss.shieldTimer = bd.shieldCooldown
+                boss.armor = 0
+            end
         end
     end
 
     -- 攻击频率随阶段提高
     if phase >= 2 then
-        boss.attackRate = WM.BOSS_DATA.attackRate * 0.7
+        boss.attackRate = bd.attackRate * 0.7
     end
     if phase >= 3 then
-        boss.attackRate = WM.BOSS_DATA.attackRate * 0.5
+        boss.attackRate = bd.attackRate * 0.5
         -- 狂暴视觉: 颜色变化
         local pulse = math.sin(WM.totalTime * 8) * 0.3 + 0.7
         boss.color[1] = math.floor(220 * pulse)
@@ -589,7 +694,7 @@ function WM.UpdateBossBehavior(boss, dt, playerX, playerY)
         boss.color[3] = math.floor(40 * pulse)
     end
 
-    return summoned
+    return summoned, chargeImpact, spinBullets
 end
 
 -- ============================================================================
@@ -607,6 +712,18 @@ function WM.Update(dt)
     if WM.phase == WM.PHASE_CLEARED then
         WM.phaseTimer = WM.phaseTimer - dt
         if WM.phaseTimer <= 0 then
+            -- 进入出口阶段(main.lua 负责生成出口瓦片)
+            WM.phase = WM.PHASE_EXIT_OPEN
+            WM.exitReady = false  -- 等待 main.lua 调用 SpawnExit 设置
+            WM.walkoutTimer = 0
+        end
+    end
+
+    -- 走出动画倒计时
+    if WM.phase == WM.PHASE_WALKOUT then
+        WM.walkoutTimer = WM.walkoutTimer - dt
+        if WM.walkoutTimer <= 0 then
+            -- 走出动画结束 → 进入奖励
             WM.AdvanceToReward()
         end
     end

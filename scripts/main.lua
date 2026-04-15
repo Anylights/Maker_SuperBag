@@ -60,13 +60,17 @@ local ENEMY_TYPES = {
         color = {200, 80, 80},
         sightRange = 200, attackRange = 180, attackRate = 0.8,
         bulletSpeed = 350,
+        attackPattern = "single",  -- 单发
     },
     sentry = {
         name = "灰狼哨兵",
-        hp = 40, speed = 0, damage = 15, radius = 14,
+        hp = 40, speed = 0, damage = 12, radius = 14,
         color = {80, 80, 200},
-        sightRange = 280, attackRange = 260, attackRate = 1.2,
+        sightRange = 280, attackRange = 260, attackRate = 1.8,
         bulletSpeed = 400,
+        attackPattern = "burst",   -- 三连发
+        burstCount = 3,            -- 每次连发3颗
+        burstInterval = 0.1,       -- 连发间隔(秒)
     },
     rusher = {
         name = "灰狼突击",
@@ -74,6 +78,18 @@ local ENEMY_TYPES = {
         color = {200, 160, 40},
         sightRange = 160, attackRange = 30, attackRate = 0.5,
         bulletSpeed = 0,  -- 近战
+        attackPattern = "melee",
+    },
+    heavy = {
+        name = "灰狼重装",
+        hp = 120, speed = 35, damage = 8, radius = 16,
+        color = {100, 100, 120},
+        sightRange = 220, attackRange = 160, attackRate = 2.2,
+        bulletSpeed = 280,
+        attackPattern = "shotgun",  -- 散弹(4发扇形)
+        shotgunPellets = 4,         -- 弹丸数
+        shotgunSpread = 0.35,       -- 扇形半角(弧度, ±20°)
+        armor = 0.3,                -- 30%伤害减免
     },
 }
 
@@ -112,6 +128,7 @@ local waveAnnounceText = ""   -- 公告文本
 -- 相机偏移(世界坐标 → 屏幕坐标)
 local camX = 0
 local camY = 0
+local camZoom = 0.75          -- 相机缩放(< 1 = 缩小看到更多, 1 = 原始比例)
 
 -- 屏幕尺寸
 local screenW = 0
@@ -147,6 +164,7 @@ local damageNumbers = {}
 
 -- 地图数据
 local mapData = {}           -- mapData[row][col] = tileType
+local mapRooms = {}          -- 房间列表(GenerateMap保存, 供SpawnExit使用)
 
 -- 搜刮状态
 local searchingCrate = nil   -- 正在搜刮的箱子 {col,row,timer}
@@ -164,6 +182,14 @@ local shakeOffsetY = 0
 local hitstopTimer = 0       -- 停顿剩余时间(秒)
 local HITSTOP_HIT = 0.03     -- 命中敌人停顿
 local HITSTOP_KILL = 0.08    -- 击杀停顿
+
+-- 走出动画状态
+local walkoutStartX = 0      -- 走出动画起始位置
+local walkoutStartY = 0
+local walkoutTargetX = 0     -- 走出动画目标位置(出口中心)
+local walkoutTargetY = 0
+local walkoutZoomStart = 0.75  -- 走出动画起始缩放
+local walkoutZoomEnd = 0.9     -- 走出动画结束缩放(微拉近)
 
 -- 背包时间缩放(替代scene_:SetTimeScale)
 local gameTimeScale = 1.0
@@ -293,6 +319,16 @@ function Start()
     local starterArtifact = Inv.CreateArtifact("a_bullet_core", 1)
     if starterArtifact then
         Inv.AddPendingItem(starterArtifact)
+    end
+
+    -- 设置背包丢弃回调: 将物品丢到玩家脚下
+    InvUI.onDiscardItem = function(item)
+        table.insert(lootItems, {
+            x = player.x + math.random(-16, 16),
+            y = player.y + math.random(-16, 16),
+            type = item.type,  -- "artifact" 或 "tablet"
+            itemData = item,
+        })
     end
 
     -- 初始化波次管理器
@@ -427,7 +463,8 @@ function GenerateMap()
         end
     end
 
-    -- 波次模式: 不再生成撤离点(改为清敌通关)
+    -- 保存房间列表(供 SpawnExit 使用)
+    mapRooms = rooms
 
     -- 玩家出生在第一个房间中心
     if #rooms >= 1 then
@@ -440,6 +477,60 @@ function GenerateMap()
     end
 
     print("Map generated: " .. #rooms .. " rooms, " .. crateCount .. " crates")
+end
+
+-- ============================================================================
+-- 出口生成 (波次清除后调用)
+-- ============================================================================
+function SpawnExit()
+    if #mapRooms < 2 then
+        -- 只有一个房间: 在房间边缘放出口
+        local room = mapRooms[1] or {x = MAP_COLS / 2 - 2, y = MAP_ROWS / 2 - 2, w = 4, h = 4}
+        local ec = room.x + room.w - 1
+        local er = room.y + room.h - 1
+        mapData[er][ec] = TILE_EXIT
+        WM.exitX = (ec - 0.5) * TILE_SIZE
+        WM.exitY = (er - 0.5) * TILE_SIZE
+        WM.exitReady = true
+        return
+    end
+
+    -- 找距离玩家最远的房间
+    local bestDist = -1
+    local bestRoom = nil
+    for _, room in ipairs(mapRooms) do
+        local rcx = (room.x + room.w / 2) * TILE_SIZE
+        local rcy = (room.y + room.h / 2) * TILE_SIZE
+        local dist = math.sqrt((rcx - player.x)^2 + (rcy - player.y)^2)
+        if dist > bestDist then
+            bestDist = dist
+            bestRoom = room
+        end
+    end
+
+    if not bestRoom then
+        bestRoom = mapRooms[#mapRooms]
+    end
+
+    -- 在该房间中心放置 3×3 出口区域
+    local centerC = math.floor(bestRoom.x + bestRoom.w / 2)
+    local centerR = math.floor(bestRoom.y + bestRoom.h / 2)
+    for dr = -1, 1 do
+        for dc = -1, 1 do
+            local rr = centerR + dr
+            local cc = centerC + dc
+            if rr >= 1 and rr <= MAP_ROWS and cc >= 1 and cc <= MAP_COLS then
+                if mapData[rr][cc] == TILE_FLOOR or mapData[rr][cc] == TILE_CRATE then
+                    mapData[rr][cc] = TILE_EXIT
+                end
+            end
+        end
+    end
+
+    WM.exitX = (centerC - 0.5) * TILE_SIZE
+    WM.exitY = (centerR - 0.5) * TILE_SIZE
+    WM.exitReady = true
+    print("Exit spawned at room center: col=" .. centerC .. " row=" .. centerR)
 end
 
 -- ============================================================================
@@ -550,6 +641,16 @@ function SpawnEnemies()
                 patrolAngle = math.random() * math.pi * 2,
                 patrolTimer = 0,
                 hitFlashTimer = 0,
+                -- 攻击模式相关
+                attackPattern = t.attackPattern or "single",
+                burstRemaining = 0,       -- burst: 剩余连发数
+                burstTimer = 0,           -- burst: 连发间隔计时
+                burstAngle = 0,           -- burst: 锁定的发射角度
+                burstCount = t.burstCount or 3,
+                burstInterval = t.burstInterval or 0.1,
+                shotgunPellets = t.shotgunPellets or 4,
+                shotgunSpread = t.shotgunSpread or 0.35,
+                armor = t.armor or 0,     -- 伤害减免比例(0~1)
             }
             table.insert(enemies, enemy)
             table.insert(placed, {x = wx, y = wy})
@@ -688,7 +789,10 @@ function HandleMouseDown(eventType, eventData)
     end
 
     if button == MOUSEB_LEFT then
-        TryShoot()
+        -- 出口/走出阶段禁止射击
+        if WM.phase ~= WM.PHASE_EXIT_OPEN and WM.phase ~= WM.PHASE_WALKOUT then
+            TryShoot()
+        end
     end
 end
 
@@ -718,6 +822,7 @@ function HandleRewardClick()
     WM.StartTransition()
     WM.transitCallback = function()
         -- 此时 AdvanceWave 已执行, currentWave 已是新波次
+        camZoom = 0.75  -- 恢复默认缩放
         GenerateMap()
         SpawnEnemies()
         local newWave = WM.GetCurrentWave()
@@ -802,14 +907,17 @@ function TryShoot()
         -- 自动换弹
         if player.totalAmmo > 0 then
             player.reloading = true
-            player.reloadTimer = WEAPON.reloadTime
+            local reloadSpeedBonus = Inv.GetStat("reloadSpeed", 0)
+            player.reloadTimer = math.max(0.3, WEAPON.reloadTime - reloadSpeedBonus)
             PlaySfx(sndReload, 0.5)
         end
         return
     end
 
-    -- 发射子弹
-    local spreadRad = math.rad(WEAPON.spread) * (math.random() - 0.5)
+    -- 应用背包散布加成(负值=更精准)
+    local spreadBonus = Inv.GetStat("spread", 0)
+    local effectiveSpread = math.max(0, WEAPON.spread + spreadBonus)
+    local spreadRad = math.rad(effectiveSpread) * (math.random() - 0.5)
     local angle = player.angle + spreadRad
     local bx = player.x + math.cos(angle) * (player.radius + 5)
     local by = player.y + math.sin(angle) * (player.radius + 5)
@@ -818,15 +926,47 @@ function TryShoot()
     local bonusDamage = Inv.GetStat("damage", 0) + WM.weaponMods.bonusDamage
     local bonusFireRate = Inv.GetStat("fireRate", 0) + WM.weaponMods.fireRateReduction
 
+    -- 暴击判定
+    local critChance = Inv.GetStat("critChance", 0)
+    local isCrit = math.random(1, 100) <= critChance
+    local finalDamage = WEAPON.damage + bonusDamage
+    if isCrit then finalDamage = math.floor(finalDamage * 2) end
+
+    -- 穿透次数(0=普通子弹击中即消失, >0=可穿透多个敌人)
+    local pierceCount = math.floor(Inv.GetStat("pierce", 0))
+
+    -- 状态效果属性(从背包汇总)
+    local burnDmg = Inv.GetStat("burnDamage", 0)
+    local burnComboMult = 1.0 + (Inv.GetStat("combo_burnDamagePercent", 0) / 100)
+    burnDmg = math.floor(burnDmg * burnComboMult)
+    local burnDur = 2.0 + Inv.GetStat("combo_burnDurationBonus", 0)
+
+    local slowAmt = Inv.GetStat("slowAmount", 0) + Inv.GetStat("combo_slowAmountBonus", 0)
+
+    local explRadius = Inv.GetStat("explosionRadius", 0)
+    local explDamage = Inv.GetStat("explosionDamage", 0)
+    local comboRadiusMult = 1.0 + (Inv.GetStat("combo_explosionRadiusPercent", 0) / 100)
+    explRadius = math.floor(explRadius * comboRadiusMult)
+
     table.insert(bullets, {
         x = bx, y = by,
         vx = math.cos(angle) * WEAPON.bulletSpeed,
         vy = math.sin(angle) * WEAPON.bulletSpeed,
-        damage = WEAPON.damage + bonusDamage,
+        damage = finalDamage,
         radius = WEAPON.bulletRadius,
         fromPlayer = true,
         life = 2.0,
         trail = {},
+        isCrit = isCrit,
+        pierce = pierceCount,
+        hitEnemies = {},  -- 已穿透过的敌人(避免重复伤害)
+        -- 状态效果
+        burnDamage = burnDmg > 0 and burnDmg or nil,
+        burnDuration = burnDmg > 0 and burnDur or nil,
+        slowAmount = slowAmt > 0 and slowAmt or nil,
+        slowDuration = slowAmt > 0 and 2.0 or nil,
+        explosionRadius = explRadius > 0 and explRadius or nil,
+        explosionDamage = explDamage > 0 and explDamage or nil,
     })
 
     player.ammo = player.ammo - 1
@@ -914,6 +1054,93 @@ function HandleUpdate(eventType, eventData)
         return
     end
 
+    -- 出口开放阶段: 允许玩家移动, 检测到达出口
+    if WM.phase == WM.PHASE_EXIT_OPEN then
+        -- 首次进入: 生成出口
+        if not WM.exitReady then
+            SpawnExit()
+        end
+
+        -- 玩家仍可移动和拾取
+        UpdatePlayer(dt)
+        UpdateParticles(dt)
+        UpdateDamageNumbers(dt)
+        UpdateCamera()
+
+        -- 拾取掉落物(复用战斗中的逻辑)
+        for i = #lootItems, 1, -1 do
+            local item = lootItems[i]
+            local pickupRadius = 10
+            if item.type == "artifact" or item.type == "tablet" then
+                pickupRadius = 20
+            end
+            if CircleCollision(player.x, player.y, player.radius + pickupRadius, item.x, item.y, 8) then
+                if item.type == "ammo" then
+                    player.totalAmmo = player.totalAmmo + item.amount
+                elseif item.type == "health" then
+                    local effectiveMaxHp = player.maxHp + Inv.GetStat("maxHp", 0)
+                    player.hp = math.min(effectiveMaxHp, player.hp + item.amount)
+                elseif item.type == "artifact" or item.type == "tablet" then
+                    Inv.AddPendingItem(item.itemData)
+                end
+                table.remove(lootItems, i)
+            end
+        end
+
+        -- 检测玩家到达出口(距离出口中心 < 40像素)
+        local exitDist = math.sqrt((player.x - WM.exitX)^2 + (player.y - WM.exitY)^2)
+        if exitDist < 40 then
+            -- 开始走出动画
+            WM.phase = WM.PHASE_WALKOUT
+            WM.walkoutTimer = WM.walkoutDuration
+            walkoutStartX = player.x
+            walkoutStartY = player.y
+            walkoutTargetX = WM.exitX
+            walkoutTargetY = WM.exitY
+            walkoutZoomStart = camZoom
+            walkoutZoomEnd = math.min(1.0, camZoom + 0.15)
+            PlaySfx(sndLevelClear, 0.6)
+        end
+        return
+    end
+
+    -- 走出动画阶段: 自动移动玩家, 禁止输入
+    if WM.phase == WM.PHASE_WALKOUT then
+        local progress = 1.0 - (WM.walkoutTimer / WM.walkoutDuration)
+        progress = math.max(0, math.min(1, progress))
+        -- ease-in-out
+        local ease = progress < 0.5
+            and (2 * progress * progress)
+            or (1 - (-2 * progress + 2)^2 / 2)
+
+        -- 插值玩家位置
+        player.x = walkoutStartX + (walkoutTargetX - walkoutStartX) * ease
+        player.y = walkoutStartY + (walkoutTargetY - walkoutStartY) * ease
+        -- 玩家朝向出口
+        player.angle = math.atan(walkoutTargetY - walkoutStartY, walkoutTargetX - walkoutStartX)
+        -- 镜头微拉近
+        camZoom = walkoutZoomStart + (walkoutZoomEnd - walkoutZoomStart) * ease
+
+        -- 走出粒子特效
+        if math.random() < 0.4 then
+            table.insert(particles, {
+                x = player.x + (math.random() - 0.5) * 16,
+                y = player.y + (math.random() - 0.5) * 16,
+                vx = (math.random() - 0.5) * 30,
+                vy = -20 - math.random() * 20,
+                life = 0.6 + math.random() * 0.3,
+                maxLife = 0.9,
+                r = 80, g = 255, b = 120,
+                size = 2 + math.random() * 3,
+                drag = 0.95,
+            })
+        end
+
+        UpdateParticles(dt)
+        UpdateCamera()
+        return
+    end
+
     -- 胜利阶段
     if WM.phase == WM.PHASE_VICTORY then
         gameState = STATE_VICTORY
@@ -939,7 +1166,7 @@ function HandleUpdate(eventType, eventData)
     gameTime = gameTime + dt
 
     -- 动态难度调整
-    WM.UpdateDifficulty(player.hp / player.maxHp)
+    WM.UpdateDifficulty(player.hp / (player.maxHp + Inv.GetStat("maxHp", 0)))
 
     UpdatePlayer(dt)
     UpdateBullets(dt)
@@ -952,9 +1179,57 @@ function HandleUpdate(eventType, eventData)
 
     -- Boss特殊行为
     if WM.phase == WM.PHASE_BOSS and WM.boss and WM.boss.hp > 0 then
-        local summoned = WM.UpdateBossBehavior(WM.boss, dt, player.x, player.y)
+        local summoned, chargeImpact, spinBullets = WM.UpdateBossBehavior(WM.boss, dt, player.x, player.y)
         if summoned then
             SpawnBossMinions(summoned.count)
+        end
+        -- 冲锋冲击波: 对玩家造成AOE伤害+击退
+        if chargeImpact then
+            local cdx = player.x - chargeImpact.x
+            local cdy = player.y - chargeImpact.y
+            local cdist = math.sqrt(cdx * cdx + cdy * cdy)
+            if cdist < chargeImpact.radius and player.invincibleTimer <= 0 then
+                player.hp = player.hp - chargeImpact.damage
+                player.invincibleTimer = 0.5
+                table.insert(damageNumbers, {
+                    x = player.x, y = player.y - player.radius - 5,
+                    text = tostring(chargeImpact.damage),
+                    life = 0.8, maxLife = 0.8, vy = -40,
+                    isPlayer = true,
+                })
+                if player.hp <= 0 then
+                    player.hp = 0
+                    player.alive = false
+                    gameState = STATE_GAMEOVER
+                end
+            end
+            -- 冲击波视觉(扩散环)
+            for kp = 1, 20 do
+                local pa = (kp / 20) * math.pi * 2
+                local spd = chargeImpact.radius * 2.5
+                table.insert(particles, {
+                    x = chargeImpact.x, y = chargeImpact.y,
+                    vx = math.cos(pa) * spd, vy = math.sin(pa) * spd,
+                    life = 0.3, maxLife = 0.3,
+                    r = 255, g = 80, b = 40,
+                    size = 3 + math.random() * 2, glow = true,
+                })
+            end
+            TriggerShake(5, 0.15)
+        end
+        -- 旋转弹幕: 生成子弹
+        if spinBullets then
+            for _, sb in ipairs(spinBullets) do
+                table.insert(bullets, {
+                    x = sb.x, y = sb.y,
+                    vx = sb.vx, vy = sb.vy,
+                    damage = sb.damage,
+                    radius = 3.5,
+                    fromPlayer = false,
+                    life = 2.5,
+                    trail = {},
+                })
+            end
         end
     end
 
@@ -1101,8 +1376,8 @@ function UpdatePlayer(dt)
     local mx = input:GetMousePosition().x
     local my = input:GetMousePosition().y
     local designMX, designMY = ScreenToDesign(mx, my)
-    local worldMX = designMX + camX
-    local worldMY = designMY + camY
+    local worldMX = designMX / camZoom + camX
+    local worldMY = designMY / camZoom + camY
     player.angle = math.atan(worldMY - player.y, worldMX - player.x)
 
     -- 射击冷却
@@ -1116,7 +1391,7 @@ function UpdatePlayer(dt)
         if player.reloadTimer <= 0 then
             player.reloading = false
             PlaySfx(sndReloadDone, 0.5)
-            local effectiveMag = WEAPON.magSize + WM.weaponMods.bonusMagSize
+            local effectiveMag = WEAPON.magSize + WM.weaponMods.bonusMagSize + math.floor(Inv.GetStat("magSize", 0))
             local need = effectiveMag - player.ammo
             local give = math.min(need, player.totalAmmo)
             player.ammo = player.ammo + give
@@ -1198,18 +1473,124 @@ function UpdateBullets(dt)
         if not remove and b.fromPlayer then
             for j = #enemies, 1, -1 do
                 local e = enemies[j]
-                if CircleCollision(b.x, b.y, b.radius, e.x, e.y, e.radius) then
-                    e.hp = e.hp - b.damage
+                -- 穿透子弹: 跳过已击中过的敌人
+                local alreadyHit = false
+                if b.hitEnemies then
+                    for _, he in ipairs(b.hitEnemies) do
+                        if he == e then alreadyHit = true; break end
+                    end
+                end
+                if not alreadyHit and CircleCollision(b.x, b.y, b.radius, e.x, e.y, e.radius) then
+                    -- 护甲减伤
+                    local actualDmg = b.damage
+                    if e.armor and e.armor > 0 then
+                        actualDmg = math.max(1, math.floor(b.damage * (1 - e.armor)))
+                    end
+                    e.hp = e.hp - actualDmg
                     e.hitFlashTimer = 0.1
                     e.state = "chase"  -- 被攻击后追击
-                    remove = true
 
-                    -- 伤害数字
+                    -- === 状态效果应用 ===
+                    -- 燃烧: 持续伤害(DoT)
+                    if b.burnDamage and b.burnDamage > 0 then
+                        e.burnTimer = b.burnDuration or 2.0
+                        e.burnDamage = b.burnDamage
+                        e.burnTickTimer = e.burnTickTimer or 0
+                    end
+                    -- 减速: 降低移动速度
+                    if b.slowAmount and b.slowAmount > 0 then
+                        e.slowTimer = b.slowDuration or 2.0
+                        e.slowPercent = math.min(0.8, (b.slowAmount / 100))  -- 最多减速80%
+                    end
+                    -- 爆炸: 对周围敌人造成AOE伤害
+                    if b.explosionRadius and b.explosionRadius > 0 and b.explosionDamage and b.explosionDamage > 0 then
+                        for k2 = #enemies, 1, -1 do
+                            local e2 = enemies[k2]
+                            if e2 ~= e then
+                                local edx = e2.x - e.x
+                                local edy = e2.y - e.y
+                                local edist = math.sqrt(edx * edx + edy * edy)
+                                if edist < b.explosionRadius then
+                                    local aoeDmg = math.floor(b.explosionDamage * (1 - edist / b.explosionRadius))
+                                    if e2.armor and e2.armor > 0 then
+                                        aoeDmg = math.max(1, math.floor(aoeDmg * (1 - e2.armor)))
+                                    end
+                                    e2.hp = e2.hp - aoeDmg
+                                    e2.hitFlashTimer = 0.1
+                                    -- AOE伤害数字
+                                    table.insert(damageNumbers, {
+                                        x = e2.x, y = e2.y - e2.radius - 5,
+                                        text = tostring(aoeDmg),
+                                        life = 0.6, maxLife = 0.6, vy = -30,
+                                        isAoe = true,
+                                    })
+                                    -- 燃烧传播(如有combo_burnSpread)
+                                    if b.burnDamage and b.burnDamage > 0 and Inv.GetStat("combo_burnSpread", false) then
+                                        e2.burnTimer = (b.burnDuration or 2.0) * 0.5
+                                        e2.burnDamage = math.floor(b.burnDamage * 0.5)
+                                        e2.burnTickTimer = e2.burnTickTimer or 0
+                                    end
+                                    -- AOE击杀判定
+                                    if e2.hp <= 0 then
+                                        killCount = killCount + 1
+                                        WM.OnEnemyKilled()
+                                        score = score + 50
+                                        -- AOE击杀粒子
+                                        for kp = 1, 10 do
+                                            local pa2 = math.random() * math.pi * 2
+                                            local spd2 = 60 + math.random() * 100
+                                            table.insert(particles, {
+                                                x = e2.x, y = e2.y,
+                                                vx = math.cos(pa2) * spd2, vy = math.sin(pa2) * spd2,
+                                                life = 0.3 + math.random() * 0.3, maxLife = 0.6,
+                                                r = 255, g = 160 + math.random(60), b = 40 + math.random(60),
+                                                size = 2 + math.random() * 2, glow = true,
+                                            })
+                                        end
+                                        table.remove(enemies, k2)
+                                    end
+                                end
+                            end
+                        end
+                        -- 爆炸冲击波视觉(用粒子环)
+                        for kp = 1, 16 do
+                            local pa = (kp / 16) * math.pi * 2
+                            local spd = b.explosionRadius * 2
+                            table.insert(particles, {
+                                x = e.x, y = e.y,
+                                vx = math.cos(pa) * spd, vy = math.sin(pa) * spd,
+                                life = 0.25, maxLife = 0.25,
+                                r = 255, g = 180, b = 60,
+                                size = 3 + math.random() * 2, glow = true,
+                            })
+                        end
+                        -- 爆炸中心闪光
+                        table.insert(particles, {
+                            x = e.x, y = e.y, vx = 0, vy = 0,
+                            life = 0.12, maxLife = 0.12,
+                            r = 255, g = 220, b = 100,
+                            size = b.explosionRadius * 0.6, glow = true, drag = 1.0,
+                        })
+                    end
+
+                    -- 穿透判定: pierce > 0 则不消除子弹
+                    if b.pierce and b.pierce > 0 then
+                        b.pierce = b.pierce - 1
+                        if b.hitEnemies then table.insert(b.hitEnemies, e) end
+                    else
+                        remove = true
+                    end
+
+                    -- 伤害数字(暴击显示金色大字, 护甲显示灰色)
+                    local dmgText = (b.isCrit and "暴击 " or "") .. tostring(actualDmg)
                     table.insert(damageNumbers, {
                         x = e.x, y = e.y - e.radius - 5,
-                        text = tostring(b.damage),
-                        life = 0.8, maxLife = 0.8,
+                        text = dmgText,
+                        life = b.isCrit and 1.2 or 0.8,
+                        maxLife = b.isCrit and 1.2 or 0.8,
                         vy = -40,
+                        isCrit = b.isCrit,
+                        isArmored = (e.armor and e.armor > 0),
                     })
 
                     -- 血花粒子(沿弹道方向喷射)
@@ -1272,23 +1653,33 @@ function UpdateBullets(dt)
 
                         -- 掉落率受背包加成影响
                         local lootBonusPct = Inv.GetStat("lootBonus", 0)
-                        local artifactChance = 25 + lootBonusPct * 0.3  -- 基础25%
-                        local tabletChance = artifactChance + 10        -- 额外10%掉石板
+                        local artifactChance = 8 + lootBonusPct * 0.3   -- 基础8%
+                        local tabletChance = artifactChance + 5          -- 额外5%掉石板
 
                         if invLootRoll <= artifactChance then
-                            -- 掉落圣物
+                            -- 掉落圣物(掉到地面, 需要玩家走过去拾取)
                             local level = 1
                             if killCount > 10 then level = math.random(1, 2) end
                             if killCount > 25 then level = math.random(1, 3) end
                             local artifact = Inv.CreateRandomArtifact(dropRarityMax, level)
                             if artifact then
-                                Inv.AddPendingItem(artifact)
+                                table.insert(lootItems, {
+                                    x = e.x + math.random(-8, 8),
+                                    y = e.y + math.random(-8, 8),
+                                    type = "artifact",
+                                    itemData = artifact,
+                                })
                             end
                         elseif invLootRoll <= tabletChance then
-                            -- 掉落石板
+                            -- 掉落石板(掉到地面)
                             local tablet = Inv.CreateRandomTablet()
                             if tablet then
-                                Inv.AddPendingItem(tablet)
+                                table.insert(lootItems, {
+                                    x = e.x + math.random(-8, 8),
+                                    y = e.y + math.random(-8, 8),
+                                    type = "tablet",
+                                    itemData = tablet,
+                                })
                             end
                         end
                         -- 击杀爆炸: 核心冲击波闪光
@@ -1396,24 +1787,80 @@ function UpdateEnemies(dt)
             e.angle = math.atan(dy, dx)
         end
 
+        -- === 状态效果 tick 处理 ===
+        -- 减速效果
+        local speedMult = 1.0
+        if e.slowTimer and e.slowTimer > 0 then
+            e.slowTimer = e.slowTimer - dt
+            speedMult = 1.0 - (e.slowPercent or 0)
+            if e.slowTimer <= 0 then
+                e.slowTimer = nil
+                e.slowPercent = nil
+            end
+        end
+        -- 燃烧效果(DoT)
+        if e.burnTimer and e.burnTimer > 0 then
+            e.burnTimer = e.burnTimer - dt
+            e.burnTickTimer = (e.burnTickTimer or 0) - dt
+            if e.burnTickTimer <= 0 then
+                e.burnTickTimer = 0.5  -- 每0.5秒跳一次伤害
+                local bDmg = e.burnDamage or 0
+                if bDmg > 0 then
+                    e.hp = e.hp - bDmg
+                    -- 燃烧伤害数字(橙色小字)
+                    table.insert(damageNumbers, {
+                        x = e.x + (math.random() - 0.5) * 10,
+                        y = e.y - e.radius - 3,
+                        text = tostring(bDmg),
+                        life = 0.5, maxLife = 0.5, vy = -25,
+                        isBurn = true,
+                    })
+                    -- 燃烧火星粒子
+                    for kp = 1, 3 do
+                        local pa = math.random() * math.pi * 2
+                        table.insert(particles, {
+                            x = e.x + (math.random() - 0.5) * e.radius,
+                            y = e.y + (math.random() - 0.5) * e.radius,
+                            vx = math.cos(pa) * (15 + math.random() * 20),
+                            vy = -30 - math.random() * 40,
+                            life = 0.3 + math.random() * 0.2, maxLife = 0.5,
+                            r = 255, g = 120 + math.random(80), b = 20 + math.random(40),
+                            size = 1.5 + math.random(), glow = true,
+                        })
+                    end
+                    -- 燃烧致死
+                    if e.hp <= 0 then
+                        killCount = killCount + 1
+                        WM.OnEnemyKilled()
+                        score = score + 50
+                    end
+                end
+            end
+            if e.burnTimer <= 0 then
+                e.burnTimer = nil
+                e.burnDamage = nil
+                e.burnTickTimer = nil
+            end
+        end
+
         -- 移动(Boss冲锋时跳过,由WM.UpdateBossBehavior控制)
         if e.state == "chase" and e.speed > 0 and not e.isCharging then
-            local mx = math.cos(e.angle) * e.speed * dt
-            local my = math.sin(e.angle) * e.speed * dt
+            local mx = math.cos(e.angle) * e.speed * speedMult * dt
+            local my = math.sin(e.angle) * e.speed * speedMult * dt
             local nx = e.x + mx
             local ny = e.y + my
             nx, ny = ResolveWallCollision(nx, ny, e.radius)
             e.x = nx
             e.y = ny
-        elseif e.state == "idle" and e.typeKey == "patrol" then
+        elseif e.state == "idle" and (e.typeKey == "patrol" or e.typeKey == "heavy") then
             -- 巡逻: 在出生点附近来回
             e.patrolTimer = e.patrolTimer + dt
             if e.patrolTimer > 3 then
                 e.patrolAngle = e.patrolAngle + math.pi * (0.5 + math.random())
                 e.patrolTimer = 0
             end
-            local mx = math.cos(e.patrolAngle) * e.speed * 0.4 * dt
-            local my = math.sin(e.patrolAngle) * e.speed * 0.4 * dt
+            local mx = math.cos(e.patrolAngle) * e.speed * 0.4 * speedMult * dt
+            local my = math.sin(e.patrolAngle) * e.speed * 0.4 * speedMult * dt
             local nx = e.x + mx
             local ny = e.y + my
             -- 不离出生点太远
@@ -1429,14 +1876,39 @@ function UpdateEnemies(dt)
             end
         end
 
+        -- burst 连发处理(已触发的连发必须完成,独立于攻击状态)
+        if e.burstRemaining and e.burstRemaining > 0 then
+            e.burstTimer = e.burstTimer - dt
+            if e.burstTimer <= 0 then
+                e.burstTimer = e.burstInterval
+                e.burstRemaining = e.burstRemaining - 1
+                -- 使用锁定角度发射(带微小抖动)
+                local bAngle = e.burstAngle + (math.random() - 0.5) * 0.06
+                local bx = e.x + math.cos(bAngle) * (e.radius + 4)
+                local by = e.y + math.sin(bAngle) * (e.radius + 4)
+                table.insert(bullets, {
+                    x = bx, y = by,
+                    vx = math.cos(bAngle) * e.bulletSpeed,
+                    vy = math.sin(bAngle) * e.bulletSpeed,
+                    damage = e.damage,
+                    radius = 3,
+                    fromPlayer = false,
+                    life = 2.0,
+                    trail = {},
+                })
+            end
+        end
+
         -- 攻击
         if e.state == "attack" then
             e.fireTimer = e.fireTimer - dt
-            if e.fireTimer <= 0 then
+            if e.fireTimer <= 0 and (not e.burstRemaining or e.burstRemaining <= 0) then
                 e.fireTimer = e.attackRate
 
-                if e.bulletSpeed > 0 then
-                    -- 远程攻击
+                local pattern = e.attackPattern or "single"
+
+                if pattern == "single" then
+                    -- 单发: 一颗子弹+轻微散布
                     local bAngle = e.angle + (math.random() - 0.5) * 0.15
                     local bx = e.x + math.cos(bAngle) * (e.radius + 4)
                     local by = e.y + math.sin(bAngle) * (e.radius + 4)
@@ -1448,9 +1920,52 @@ function UpdateEnemies(dt)
                         radius = 3,
                         fromPlayer = false,
                         life = 2.0,
-                        trail = {},  -- 敌人子弹也有拖尾
+                        trail = {},
                     })
-                else
+
+                elseif pattern == "burst" then
+                    -- 三连发: 立即发射第一颗,后续通过 burstRemaining 计时
+                    e.burstAngle = e.angle
+                    e.burstRemaining = e.burstCount - 1
+                    e.burstTimer = e.burstInterval
+                    -- 第一颗立即发射
+                    local bAngle = e.burstAngle + (math.random() - 0.5) * 0.06
+                    local bx = e.x + math.cos(bAngle) * (e.radius + 4)
+                    local by = e.y + math.sin(bAngle) * (e.radius + 4)
+                    table.insert(bullets, {
+                        x = bx, y = by,
+                        vx = math.cos(bAngle) * e.bulletSpeed,
+                        vy = math.sin(bAngle) * e.bulletSpeed,
+                        damage = e.damage,
+                        radius = 3,
+                        fromPlayer = false,
+                        life = 2.0,
+                        trail = {},
+                    })
+
+                elseif pattern == "shotgun" then
+                    -- 散弹: 多颗弹丸扇形展开
+                    local pellets = e.shotgunPellets
+                    local spread = e.shotgunSpread
+                    for p = 1, pellets do
+                        local frac = (p - 1) / math.max(1, pellets - 1) -- 0~1
+                        local bAngle = e.angle - spread + frac * spread * 2
+                        bAngle = bAngle + (math.random() - 0.5) * 0.08
+                        local bx = e.x + math.cos(bAngle) * (e.radius + 4)
+                        local by = e.y + math.sin(bAngle) * (e.radius + 4)
+                        table.insert(bullets, {
+                            x = bx, y = by,
+                            vx = math.cos(bAngle) * e.bulletSpeed,
+                            vy = math.sin(bAngle) * e.bulletSpeed,
+                            damage = e.damage,
+                            radius = 2.5,
+                            fromPlayer = false,
+                            life = 1.2,  -- 散弹射程较短
+                            trail = {},
+                        })
+                    end
+
+                elseif pattern == "melee" then
                     -- 近战攻击
                     if dist < e.attackRange + player.radius and player.invincibleTimer <= 0 then
                         player.hp = player.hp - e.damage
@@ -1475,6 +1990,26 @@ function UpdateEnemies(dt)
         -- 受击闪烁
         if e.hitFlashTimer > 0 then
             e.hitFlashTimer = e.hitFlashTimer - dt
+        end
+    end
+
+    -- 清除燃烧致死的敌人(反向遍历安全删除)
+    for i = #enemies, 1, -1 do
+        if enemies[i].hp <= 0 then
+            local ed = enemies[i]
+            -- 死亡粒子
+            for kp = 1, 12 do
+                local pa = math.random() * math.pi * 2
+                local spd = 60 + math.random() * 100
+                table.insert(particles, {
+                    x = ed.x, y = ed.y,
+                    vx = math.cos(pa) * spd, vy = math.sin(pa) * spd,
+                    life = 0.3 + math.random() * 0.3, maxLife = 0.6,
+                    r = ed.color[1], g = ed.color[2], b = ed.color[3],
+                    size = 2 + math.random() * 2, gravity = 100, drag = 0.96,
+                })
+            end
+            table.remove(enemies, i)
         end
     end
 end
@@ -1564,7 +2099,11 @@ function UpdateSearch(dt)
     -- 拾取掉落物(自动)
     for i = #lootItems, 1, -1 do
         local item = lootItems[i]
-        if CircleCollision(player.x, player.y, player.radius + 10, item.x, item.y, 8) then
+        local pickupRadius = 10
+        if item.type == "artifact" or item.type == "tablet" then
+            pickupRadius = 20  -- 圣物/石板拾取范围更大
+        end
+        if CircleCollision(player.x, player.y, player.radius + pickupRadius, item.x, item.y, 8) then
             if item.type == "ammo" then
                 player.totalAmmo = player.totalAmmo + item.amount
                 table.insert(damageNumbers, {
@@ -1574,12 +2113,25 @@ function UpdateSearch(dt)
                     vy = -30,
                 })
             elseif item.type == "health" then
-                player.hp = math.min(player.maxHp, player.hp + item.amount)
+                local effectiveMaxHp = player.maxHp + Inv.GetStat("maxHp", 0)
+                player.hp = math.min(effectiveMaxHp, player.hp + item.amount)
                 table.insert(damageNumbers, {
                     x = item.x, y = item.y - 10,
                     text = "+" .. item.amount .. " HP",
                     life = 1.0, maxLife = 1.0,
                     vy = -30,
+                })
+            elseif item.type == "artifact" or item.type == "tablet" then
+                -- 圣物/石板拾取 → 进入背包待放入列表
+                Inv.AddPendingItem(item.itemData)
+                local rarity = item.itemData.rarity or 1
+                local rarityCol = InvData.RARITY_COLORS[rarity] or {200, 200, 200}
+                table.insert(damageNumbers, {
+                    x = item.x, y = item.y - 10,
+                    text = "拾取: " .. item.itemData.name,
+                    life = 1.5, maxLife = 1.5,
+                    vy = -25,
+                    r = rarityCol[1], g = rarityCol[2], b = rarityCol[3],
                 })
             end
             table.remove(lootItems, i)
@@ -1588,12 +2140,15 @@ function UpdateSearch(dt)
 end
 
 function UpdateCamera()
-    -- 相机跟随玩家(居中, 视口大小 = 设计分辨率)
-    camX = player.x - DESIGN_W / 2
-    camY = player.y - DESIGN_H / 2
+    -- 缩放后的可见区域(世界坐标尺寸)
+    local viewW = DESIGN_W / camZoom
+    local viewH = DESIGN_H / camZoom
+    -- 相机跟随玩家(居中)
+    camX = player.x - viewW / 2
+    camY = player.y - viewH / 2
     -- 限制在地图范围内
-    camX = math.max(0, math.min(MAP_W - DESIGN_W, camX))
-    camY = math.max(0, math.min(MAP_H - DESIGN_H, camY))
+    camX = math.max(0, math.min(MAP_W - viewW, camX))
+    camY = math.max(0, math.min(MAP_H - viewH, camY))
 end
 
 function RestartGame()
@@ -1668,10 +2223,11 @@ function HandleNanoVGRender(eventType, eventData)
     nvgFillColor(vg, nvgRGBA(20, 35, 15, 255))
     nvgFill(vg)
 
-    -- 世界空间 (设计分辨率缩放 + 相机偏移 + 震动)
+    -- 世界空间 (设计分辨率缩放 + 相机缩放 + 相机偏移 + 震动)
     nvgSave(vg)
     nvgTranslate(vg, renderOffsetX, renderOffsetY)
     nvgScale(vg, renderScale, renderScale)
+    nvgScale(vg, camZoom, camZoom)
     nvgTranslate(vg, -camX + shakeOffsetX, -camY + shakeOffsetY)
 
     -- 绘制地图
@@ -1701,6 +2257,44 @@ function HandleNanoVGRender(eventType, eventData)
     -- 绘制搜刮进度
     DrawSearchProgress()
 
+    -- 出口光柱特效 (世界空间)
+    if (WM.phase == WM.PHASE_EXIT_OPEN or WM.phase == WM.PHASE_WALKOUT) and WM.exitReady then
+        local t = GetTime():GetElapsedTime()
+        local pulse = 0.5 + 0.5 * math.sin(t * 3)
+        local beamAlpha = math.floor(40 + 30 * pulse)
+
+        -- 向上的光柱(渐变消失)
+        local beamW = TILE_SIZE * 2
+        local beamH = TILE_SIZE * 6
+        local beamX = WM.exitX - beamW / 2
+        local beamY = WM.exitY - beamH
+
+        local beamGrad = nvgLinearGradient(vg,
+            beamX + beamW / 2, WM.exitY,
+            beamX + beamW / 2, beamY,
+            nvgRGBA(80, 255, 120, beamAlpha),
+            nvgRGBA(80, 255, 120, 0))
+        nvgBeginPath(vg)
+        nvgRect(vg, beamX, beamY, beamW, beamH)
+        nvgFillPaint(vg, beamGrad)
+        nvgFill(vg)
+
+        -- 出口中心光环
+        local ringRadius = TILE_SIZE * 1.5 + 4 * math.sin(t * 2)
+        nvgBeginPath(vg)
+        nvgCircle(vg, WM.exitX, WM.exitY, ringRadius)
+        nvgStrokeColor(vg, nvgRGBA(80, 255, 120, math.floor(100 * pulse)))
+        nvgStrokeWidth(vg, 2)
+        nvgStroke(vg)
+
+        -- "出口"文字(世界空间)
+        nvgFontFace(vg, "sans")
+        nvgFontSize(vg, 12)
+        nvgTextAlign(vg, NVG_ALIGN_CENTER + NVG_ALIGN_BOTTOM)
+        nvgFillColor(vg, nvgRGBA(80, 255, 120, math.floor(200 * pulse)))
+        nvgText(vg, WM.exitX, WM.exitY - TILE_SIZE * 1.8, "出口", nil)
+    end
+
     nvgRestore(vg)
 
     -- 受伤红色闪屏(无敌帧期间)
@@ -1722,9 +2316,10 @@ function HandleNanoVGRender(eventType, eventData)
     end
 
     -- 低血量持续暗角警告
-    if player.hp < player.maxHp * 0.3 and player.alive then
+    local warnMaxHp = player.maxHp + Inv.GetStat("maxHp", 0)
+    if player.hp < warnMaxHp * 0.3 and player.alive then
         local pulse = math.sin(GetTime():GetElapsedTime() * 5) * 0.4 + 0.6
-        local warnAlpha = math.floor((1 - player.hp / (player.maxHp * 0.3)) * 50 * pulse)
+        local warnAlpha = math.floor((1 - player.hp / (warnMaxHp * 0.3)) * 50 * pulse)
         nvgSave(vg)
         nvgTranslate(vg, renderOffsetX, renderOffsetY)
         nvgScale(vg, renderScale, renderScale)
@@ -1762,6 +2357,15 @@ function HandleNanoVGRender(eventType, eventData)
         nvgTranslate(vg, renderOffsetX, renderOffsetY)
         nvgScale(vg, renderScale, renderScale)
         DrawWaveCleared(DESIGN_W, DESIGN_H)
+        nvgRestore(vg)
+    end
+
+    -- 出口方向指示器 (出口阶段 + 走出动画)
+    if WM.phase == WM.PHASE_EXIT_OPEN or WM.phase == WM.PHASE_WALKOUT then
+        nvgSave(vg)
+        nvgTranslate(vg, renderOffsetX, renderOffsetY)
+        nvgScale(vg, renderScale, renderScale)
+        DrawExitIndicator(DESIGN_W, DESIGN_H)
         nvgRestore(vg)
     end
 
@@ -1829,21 +2433,24 @@ local function DrawTileImage(tileImg, x, y)
 end
 
 function DrawMap(viewW, viewH)
+    -- 缩放后的世界可见区域
+    local zoomViewW = viewW / camZoom
+    local zoomViewH = viewH / camZoom
     -- 计算 SHOW_ALL 额外可见区域（非16:9屏幕会露出设计分辨率之外的内容）
-    local extraW = (renderOffsetX or 0) / (renderScale or 1)
-    local extraH = (renderOffsetY or 0) / (renderScale or 1)
+    local extraW = (renderOffsetX or 0) / ((renderScale or 1) * camZoom)
+    local extraH = (renderOffsetY or 0) / ((renderScale or 1) * camZoom)
 
     -- 先用深色森林背景填充整个可见区域，防止黑边
     nvgBeginPath(vg)
-    nvgRect(vg, camX - extraW - 1, camY - extraH - 1, viewW + extraW * 2 + 2, viewH + extraH * 2 + 2)
+    nvgRect(vg, camX - extraW - 1, camY - extraH - 1, zoomViewW + extraW * 2 + 2, zoomViewH + extraH * 2 + 2)
     nvgFillColor(vg, nvgRGBA(20, 35, 15, 255))
     nvgFill(vg)
 
-    -- 扩展绘制范围覆盖额外可见区域
+    -- 扩展绘制范围覆盖额外可见区域(使用缩放后的世界尺寸)
     local startCol = math.max(1, math.floor((camX - extraW) / TILE_SIZE))
-    local endCol = math.min(MAP_COLS, math.ceil((camX + viewW + extraW) / TILE_SIZE) + 1)
+    local endCol = math.min(MAP_COLS, math.ceil((camX + zoomViewW + extraW) / TILE_SIZE) + 1)
     local startRow = math.max(1, math.floor((camY - extraH) / TILE_SIZE))
-    local endRow = math.min(MAP_ROWS, math.ceil((camY + viewH + extraH) / TILE_SIZE) + 1)
+    local endRow = math.min(MAP_ROWS, math.ceil((camY + zoomViewH + extraH) / TILE_SIZE) + 1)
 
     for r = startRow, endRow do
         for c = startCol, endCol do
@@ -2059,6 +2666,46 @@ function DrawEnemies()
                 nvgFillColor(vg, nvgRGBA(255, 100, 40, 80))
                 nvgFill(vg)
             end
+
+            -- Boss护盾(金色六边形闪烁)
+            if e.shieldActive then
+                local shieldPulse = math.sin(gameTimeAcc * 6) * 0.3 + 0.7
+                nvgBeginPath(vg)
+                nvgCircle(vg, e.x, e.y, e.radius + 5)
+                nvgStrokeColor(vg, nvgRGBA(255, 200, 60, math.floor(180 * shieldPulse)))
+                nvgStrokeWidth(vg, 2.5)
+                nvgStroke(vg)
+                nvgBeginPath(vg)
+                nvgCircle(vg, e.x, e.y, e.radius + 2)
+                nvgFillColor(vg, nvgRGBA(255, 220, 80, math.floor(40 * shieldPulse)))
+                nvgFill(vg)
+            end
+
+            -- Boss旋转弹幕蓄力(紫色旋涡)
+            if e.isSpinning then
+                local spinVis = math.sin(gameTimeAcc * 10) * 0.3 + 0.7
+                nvgBeginPath(vg)
+                nvgCircle(vg, e.x, e.y, e.radius + 8)
+                nvgStrokeColor(vg, nvgRGBA(180, 60, 255, math.floor(100 * spinVis)))
+                nvgStrokeWidth(vg, 2)
+                nvgStroke(vg)
+            end
+        end
+
+        -- 重装兵专属: 护甲光环(灰蓝色金属质感)
+        if e.typeKey == "heavy" then
+            local armorPulse = math.sin(gameTimeAcc * 2 + i * 0.5) * 0.2 + 0.8
+            -- 外圈护甲环
+            nvgBeginPath(vg)
+            nvgCircle(vg, e.x, e.y, e.radius + 3)
+            nvgStrokeColor(vg, nvgRGBA(140, 160, 200, math.floor(100 * armorPulse)))
+            nvgStrokeWidth(vg, 2.5)
+            nvgStroke(vg)
+            -- 内部金属光泽
+            nvgBeginPath(vg)
+            nvgCircle(vg, e.x, e.y, e.radius + 1)
+            nvgFillColor(vg, nvgRGBA(100, 120, 160, math.floor(30 * armorPulse)))
+            nvgFill(vg)
         end
 
         -- 敌人摇摆动画: 移动中的敌人左右轻摇, 每个敌人相位不同
@@ -2120,6 +2767,38 @@ function DrawEnemies()
 
         nvgRestore(vg)
 
+        -- === 状态效果视觉 ===
+        -- 燃烧: 橙红色火焰光环
+        if e.burnTimer and e.burnTimer > 0 then
+            local flicker = math.sin(gameTimeAcc * 12 + i * 2.3) * 0.3 + 0.7
+            -- 外圈火焰光晕
+            nvgBeginPath(vg)
+            nvgCircle(vg, e.x, e.y, e.radius + 4)
+            nvgStrokeColor(vg, nvgRGBA(255, 120, 30, math.floor(140 * flicker)))
+            nvgStrokeWidth(vg, 2)
+            nvgStroke(vg)
+            -- 内圈橙色叠加
+            nvgBeginPath(vg)
+            nvgCircle(vg, e.x, e.y, e.radius)
+            nvgFillColor(vg, nvgRGBA(255, 80, 20, math.floor(40 * flicker)))
+            nvgFill(vg)
+        end
+        -- 减速: 蓝色冰霜覆盖
+        if e.slowTimer and e.slowTimer > 0 then
+            local frostPulse = math.sin(gameTimeAcc * 4 + i * 1.7) * 0.2 + 0.8
+            -- 冰霜外圈
+            nvgBeginPath(vg)
+            nvgCircle(vg, e.x, e.y, e.radius + 2)
+            nvgStrokeColor(vg, nvgRGBA(100, 180, 255, math.floor(120 * frostPulse)))
+            nvgStrokeWidth(vg, 1.5)
+            nvgStroke(vg)
+            -- 冰霜内部覆盖
+            nvgBeginPath(vg)
+            nvgCircle(vg, e.x, e.y, e.radius - 1)
+            nvgFillColor(vg, nvgRGBA(80, 160, 255, math.floor(35 * frostPulse)))
+            nvgFill(vg)
+        end
+
         -- 血条(受伤时显示) - 不受摇摆影响
         if e.hp < e.maxHp then
             local barW = e.radius * 2.5
@@ -2143,6 +2822,15 @@ function DrawEnemies()
                 nvgFillColor(vg, nvgRGBA(220, 60, 60, 220))
             end
             nvgFill(vg)
+
+            -- 重装兵: 血条下方额外显示护甲标记
+            if e.armor and e.armor > 0 then
+                local armorY = barY + barH + 1
+                nvgBeginPath(vg)
+                nvgRect(vg, barX, armorY, barW, 2)
+                nvgFillColor(vg, nvgRGBA(120, 140, 180, 200))
+                nvgFill(vg)
+            end
         end
 
         -- 警觉标记
@@ -2215,17 +2903,56 @@ function DrawLootItems()
     for _, item in ipairs(lootItems) do
         local bounce = math.sin(t * 4 + item.x) * 2
 
-        nvgBeginPath(vg)
-        nvgCircle(vg, item.x, item.y + bounce, 6)
-        if item.type == "ammo" then
-            nvgFillColor(vg, nvgRGBA(255, 200, 60, 220))
+        if item.type == "artifact" or item.type == "tablet" then
+            -- 圣物/石板: 稀有度颜色发光宝珠 + 名称标签
+            local rarity = item.itemData.rarity or 1
+            local col = InvData.RARITY_COLORS[rarity] or {200, 200, 200}
+            local pulse = 0.7 + 0.3 * math.sin(t * 5 + item.y)  -- 脉冲发光
+
+            -- 外层光晕
+            nvgBeginPath(vg)
+            nvgCircle(vg, item.x, item.y + bounce, 14)
+            nvgFillColor(vg, nvgRGBA(col[1], col[2], col[3], math.floor(35 * pulse)))
+            nvgFill(vg)
+
+            -- 中层光晕
+            nvgBeginPath(vg)
+            nvgCircle(vg, item.x, item.y + bounce, 9)
+            nvgFillColor(vg, nvgRGBA(col[1], col[2], col[3], math.floor(70 * pulse)))
+            nvgFill(vg)
+
+            -- 内核宝珠
+            nvgBeginPath(vg)
+            nvgCircle(vg, item.x, item.y + bounce, 5)
+            nvgFillColor(vg, nvgRGBA(
+                math.min(255, col[1] + 60),
+                math.min(255, col[2] + 60),
+                math.min(255, col[3] + 60), 230))
+            nvgFill(vg)
+            nvgStrokeColor(vg, nvgRGBA(255, 255, 255, math.floor(140 * pulse)))
+            nvgStrokeWidth(vg, 1.5)
+            nvgStroke(vg)
+
+            -- 物品名称(头顶)
+            nvgFontFace(vg, "sans")
+            nvgFontSize(vg, 9)
+            nvgTextAlign(vg, NVG_ALIGN_CENTER + NVG_ALIGN_BOTTOM)
+            nvgFillColor(vg, nvgRGBA(col[1], col[2], col[3], 200))
+            nvgText(vg, item.x, item.y + bounce - 12, item.itemData.name, nil)
         else
-            nvgFillColor(vg, nvgRGBA(100, 255, 100, 220))
+            -- 弹药/血包: 原有样式
+            nvgBeginPath(vg)
+            nvgCircle(vg, item.x, item.y + bounce, 6)
+            if item.type == "ammo" then
+                nvgFillColor(vg, nvgRGBA(255, 200, 60, 220))
+            else
+                nvgFillColor(vg, nvgRGBA(100, 255, 100, 220))
+            end
+            nvgFill(vg)
+            nvgStrokeColor(vg, nvgRGBA(255, 255, 255, 120))
+            nvgStrokeWidth(vg, 1)
+            nvgStroke(vg)
         end
-        nvgFill(vg)
-        nvgStrokeColor(vg, nvgRGBA(255, 255, 255, 120))
-        nvgStrokeWidth(vg, 1)
-        nvgStroke(vg)
     end
 end
 
@@ -2274,10 +3001,27 @@ function DrawDamageNumbers()
 
     for _, d in ipairs(damageNumbers) do
         local alpha = math.floor((d.life / d.maxLife) * 255)
-        nvgFontSize(vg, 14)
-        if d.isPlayer then
+        if d.isCrit then
+            -- 暴击: 金色大字
+            nvgFontSize(vg, 20)
+            nvgFillColor(vg, nvgRGBA(255, 210, 50, alpha))
+        elseif d.isBurn then
+            -- 燃烧DoT: 橙色小字
+            nvgFontSize(vg, 11)
+            nvgFillColor(vg, nvgRGBA(255, 150, 40, alpha))
+        elseif d.isAoe then
+            -- 爆炸AOE: 黄橙色
+            nvgFontSize(vg, 13)
+            nvgFillColor(vg, nvgRGBA(255, 180, 60, alpha))
+        elseif d.isPlayer then
+            nvgFontSize(vg, 14)
             nvgFillColor(vg, nvgRGBA(255, 80, 80, alpha))
+        elseif d.r and d.g and d.b then
+            -- 自定义颜色(如拾取物品)
+            nvgFontSize(vg, 13)
+            nvgFillColor(vg, nvgRGBA(d.r, d.g, d.b, alpha))
         else
+            nvgFontSize(vg, 14)
             nvgFillColor(vg, nvgRGBA(255, 255, 255, alpha))
         end
         nvgText(vg, d.x, d.y, d.text, nil)
@@ -2287,8 +3031,9 @@ end
 function DrawFogOfWar(viewW, viewH)
     -- 无级渐变战争迷雾: 单个 radialGradient 从透明核心平滑过渡到半透明黑暗
     local fogAlpha = 178  -- ~70% 不透明度, 可以隐约看到视野外的地形
-    local innerR = 100     -- 渐变起始(完全透明)
-    local outerR = 260     -- 渐变结束(完全黑暗)
+    -- 缩放后视野更大, 需要按比例扩大迷雾半径
+    local innerR = 100 / camZoom     -- 渐变起始(完全透明)
+    local outerR = 260 / camZoom     -- 渐变结束(完全黑暗)
 
     -- 微弱呼吸
     local t = GetTime():GetElapsedTime()
@@ -2302,10 +3047,12 @@ function DrawFogOfWar(viewW, viewH)
     nvgSave(vg)
 
     -- 外围纯黑(渐变圆之外的区域), 挖掉渐变覆盖的圆
-    local fogExtraW = (renderOffsetX or 0) / (renderScale or 1)
-    local fogExtraH = (renderOffsetY or 0) / (renderScale or 1)
+    local zoomViewW = viewW / camZoom
+    local zoomViewH = viewH / camZoom
+    local fogExtraW = (renderOffsetX or 0) / ((renderScale or 1) * camZoom)
+    local fogExtraH = (renderOffsetY or 0) / ((renderScale or 1) * camZoom)
     nvgBeginPath(vg)
-    nvgRect(vg, camX - fogExtraW - 20, camY - fogExtraH - 20, viewW + fogExtraW * 2 + 40, viewH + fogExtraH * 2 + 40)
+    nvgRect(vg, camX - fogExtraW - 20, camY - fogExtraH - 20, zoomViewW + fogExtraW * 2 + 40, zoomViewH + fogExtraH * 2 + 40)
     nvgPathWinding(vg, NVG_HOLE)
     nvgCircle(vg, px, py, oR)
     nvgFillColor(vg, nvgRGBA(0, 0, 0, fogAlpha))
@@ -2395,7 +3142,90 @@ function DrawWaveCleared(w, h)
     nvgFontSize(vg, 13)
     nvgFillColor(vg, nvgRGBA(180, 180, 180, 180))
     nvgText(vg, w / 2, h / 2 + 44,
-        remaining .. " 秒后进入奖励选择...", nil)
+        remaining .. " 秒后开放出口...", nil)
+end
+
+--- 出口方向指示器 (PHASE_EXIT_OPEN / PHASE_WALKOUT 时显示, 屏幕空间)
+function DrawExitIndicator(w, h)
+    if not WM.exitReady then return end
+
+    local t = GetTime():GetElapsedTime()
+
+    -- 计算出口在屏幕上的位置
+    local exitScreenX = (WM.exitX - camX) * camZoom
+    local exitScreenY = (WM.exitY - camY) * camZoom
+
+    -- 判断出口是否在屏幕可见区域内
+    local margin = 60
+    local onScreen = exitScreenX > margin and exitScreenX < w - margin
+                 and exitScreenY > margin and exitScreenY < h - margin
+
+    -- 玩家屏幕中心位置
+    local playerScreenX = (player.x - camX) * camZoom
+    local playerScreenY = (player.y - camY) * camZoom
+
+    -- 方向角
+    local angle = math.atan(exitScreenY - playerScreenY, exitScreenX - playerScreenX)
+    local dist = math.sqrt((WM.exitX - player.x)^2 + (WM.exitY - player.y)^2)
+
+    if not onScreen then
+        -- 出口不可见: 在屏幕边缘绘制方向箭头
+        local arrowDist = math.min(w, h) * 0.4
+        local ax = w / 2 + math.cos(angle) * arrowDist
+        local ay = h / 2 + math.sin(angle) * arrowDist
+        -- 限制在屏幕边缘
+        ax = math.max(40, math.min(w - 40, ax))
+        ay = math.max(40, math.min(h - 40, ay))
+
+        local pulse = 0.7 + 0.3 * math.sin(t * 4)
+        local arrowAlpha = math.floor(220 * pulse)
+
+        -- 箭头背景圆
+        nvgBeginPath(vg)
+        nvgCircle(vg, ax, ay, 18)
+        nvgFillColor(vg, nvgRGBA(0, 0, 0, 140))
+        nvgFill(vg)
+
+        -- 箭头三角形
+        nvgSave(vg)
+        nvgTranslate(vg, ax, ay)
+        nvgRotate(vg, angle)
+        nvgBeginPath(vg)
+        nvgMoveTo(vg, 12, 0)
+        nvgLineTo(vg, -6, -8)
+        nvgLineTo(vg, -6, 8)
+        nvgClosePath(vg)
+        nvgFillColor(vg, nvgRGBA(80, 255, 120, arrowAlpha))
+        nvgFill(vg)
+        nvgRestore(vg)
+
+        -- 距离文字
+        local distText = math.floor(dist / TILE_SIZE) .. "m"
+        nvgFontFace(vg, "sans")
+        nvgFontSize(vg, 11)
+        nvgTextAlign(vg, NVG_ALIGN_CENTER + NVG_ALIGN_MIDDLE)
+        nvgFillColor(vg, nvgRGBA(200, 255, 200, arrowAlpha))
+        nvgText(vg, ax, ay + 24, distText, nil)
+    end
+
+    -- 顶部提示文字
+    local hintPulse = 0.6 + 0.4 * math.sin(t * 3)
+    nvgFontFace(vg, "sans")
+    nvgFontSize(vg, 18)
+    nvgTextAlign(vg, NVG_ALIGN_CENTER + NVG_ALIGN_MIDDLE)
+
+    if WM.phase == WM.PHASE_WALKOUT then
+        nvgFillColor(vg, nvgRGBA(80, 255, 120, math.floor(255 * hintPulse)))
+        nvgText(vg, w / 2, 48, "正在撤离...", nil)
+    else
+        nvgFillColor(vg, nvgRGBA(80, 255, 120, math.floor(200 * hintPulse)))
+        nvgText(vg, w / 2, 48, "前往出口撤离!", nil)
+
+        -- 距离提示(居中, 小字)
+        nvgFontSize(vg, 13)
+        nvgFillColor(vg, nvgRGBA(180, 220, 180, 180))
+        nvgText(vg, w / 2, 68, math.floor(dist / TILE_SIZE) .. " 米", nil)
+    end
 end
 
 --- 奖励选择界面 (PHASE_REWARD 时显示)
@@ -2684,7 +3514,8 @@ function DrawHUD(w, h)
     local hpBarY = 16
     local hpBarW = 160
     local hpBarH = 16
-    local hpRatio = player.hp / player.maxHp
+    local effectiveMaxHp = player.maxHp + Inv.GetStat("maxHp", 0)
+    local hpRatio = player.hp / effectiveMaxHp
 
     -- 血条背景
     nvgBeginPath(vg)
@@ -2710,7 +3541,7 @@ function DrawHUD(w, h)
     nvgTextAlign(vg, NVG_ALIGN_CENTER + NVG_ALIGN_MIDDLE)
     nvgFillColor(vg, nvgRGBA(255, 255, 255, 255))
     nvgText(vg, hpBarX + hpBarW / 2, hpBarY + hpBarH / 2,
-        player.hp .. " / " .. player.maxHp, nil)
+        math.floor(player.hp) .. " / " .. math.floor(effectiveMaxHp), nil)
 
     -- === 左上第二行: 弹药 ===
     nvgFontSize(vg, 14)

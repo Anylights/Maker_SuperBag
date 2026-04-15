@@ -20,6 +20,7 @@ UI.hoverCol = 0               -- 鼠标悬停的格子坐标
 UI.hoverRow = 0
 UI.selectedPendingIndex = 0   -- 待放入列表选中索引
 UI.animAlpha = 0              -- 打开/关闭动画alpha
+UI.onDiscardItem = nil        -- 丢弃回调: function(item) → 由main.lua设置
 
 -- 布局参数(在Draw中根据屏幕尺寸动态计算)
 local gridOriginX = 0         -- 格子区域左上角屏幕坐标
@@ -29,6 +30,10 @@ local pendingAreaX = 0
 local pendingAreaY = 0
 local statsAreaX = 0
 local statsAreaY = 0
+local panelX_ = 0             -- 面板边界(用于丢弃判定)
+local panelY_ = 0
+local panelW_ = 0
+local panelH_ = 0
 
 -- ============================================================================
 -- 打开/关闭
@@ -138,8 +143,19 @@ function UI.HandleMouseUp(mx, my, button)
         if Inv.CanPlace(item, placeCol, placeRow) then
             Inv.PlaceItem(item, placeCol, placeRow)
         else
-            -- 放不下, 加回待放入列表
-            Inv.AddPendingItem(item)
+            -- 检查鼠标是否在面板外 → 丢弃物品
+            local outsidePanel = mx < panelX_ or mx > panelX_ + panelW_
+                              or my < panelY_ or my > panelY_ + panelH_ + 60
+            if outsidePanel then
+                -- 丢弃: 从背包移除并通知主模块
+                Inv.DiscardItem(item)
+                if UI.onDiscardItem then
+                    UI.onDiscardItem(item)
+                end
+            else
+                -- 面板内但放不下 → 加回待放入列表
+                Inv.AddPendingItem(item)
+            end
         end
 
         return true
@@ -222,6 +238,12 @@ function UI.Draw(nvg, logicalW, logicalH, mouseX, mouseY)
     -- 面板居中
     local panelX = (logicalW - panelW) / 2
     local panelY = (logicalH - panelH) / 2
+
+    -- 保存面板边界(供丢弃判定使用)
+    panelX_ = panelX
+    panelY_ = panelY
+    panelW_ = panelW
+    panelH_ = panelH
 
     -- 格子区域
     gridOriginX = panelX + 16
@@ -306,7 +328,7 @@ function UI.Draw(nvg, logicalW, logicalH, mouseX, mouseY)
     nvgTextAlign(nvg, NVG_ALIGN_CENTER + NVG_ALIGN_BOTTOM)
     nvgFillColor(nvg, nvgRGBA(140, 140, 160, math.floor(160 * alpha)))
     nvgText(nvg, logicalW / 2, logicalH - 10,
-        "拖拽放置 | 右键/R旋转 | Tab关闭背包", nil)
+        "拖拽放置 | 右键/R旋转 | 拖出面板丢弃 | Tab关闭背包", nil)
 end
 
 -- ============================================================================
@@ -489,13 +511,30 @@ function UI.DrawDragPreview(nvg, mouseX, mouseY, alpha)
         end
     end
 
+    -- 检测是否在面板外(丢弃区域)
+    local outsidePanel = mouseX < panelX_ or mouseX > panelX_ + panelW_
+                      or mouseY < panelY_ or mouseY > panelY_ + panelH_ + 60
+
     -- 跟随鼠标的物品(半透明)
     local drawX = mouseX - UI.dragOffsetX
     local drawY = mouseY - UI.dragOffsetY
     nvgSave(nvg)
-    nvgGlobalAlpha(nvg, 0.75)
+    if outsidePanel then
+        nvgGlobalAlpha(nvg, 0.4)
+    else
+        nvgGlobalAlpha(nvg, 0.75)
+    end
     UI.DrawItem(nvg, item, drawX, drawY, 1.0, alpha)
     nvgRestore(nvg)
+
+    -- 面板外: 显示丢弃提示
+    if outsidePanel then
+        nvgFontFace(nvg, "sans")
+        nvgFontSize(nvg, 12)
+        nvgTextAlign(nvg, NVG_ALIGN_CENTER + NVG_ALIGN_TOP)
+        nvgFillColor(nvg, nvgRGBA(255, 80, 80, math.floor(220 * alpha)))
+        nvgText(nvg, mouseX, mouseY + h * cellSize / 2 + 4, "松开丢弃", nil)
+    end
 end
 
 function UI.DrawItemTooltip(nvg, item, mx, my, logicalW, logicalH, alpha)

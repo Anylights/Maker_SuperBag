@@ -181,6 +181,8 @@ local fontNormal = -1
 
 -- 角色图片句柄
 local imgPlayer = -1
+local imgSlashFrames = {}   -- 近战刀光序列帧 (6帧)
+local SLASH_FRAME_COUNT = 6
 local imgEnemies = {}        -- typeKey → NanoVG image handle
 local gameTimeAcc = 0        -- 累计时间(用于摇摆动画)
 
@@ -338,6 +340,9 @@ function Start()
     -- 加载角色图片(绿幕抠图后的透明PNG)
     imgPlayer = nvgCreateImage(vg, "image/wolf_player.png", 0)
     imgPlayerWhite = nvgCreateImage(vg, "image/wolf_player_white.png", 0)
+    for i = 1, SLASH_FRAME_COUNT do
+        imgSlashFrames[i] = nvgCreateImage(vg, string.format("image/slash_vfx/slash_%02d.png", i), 0)
+    end
     imgEnemies = {
         patrol = nvgCreateImage(vg, "image/wolf_patrol.png", 0),
         sentry = nvgCreateImage(vg, "image/wolf_sentry.png", 0),
@@ -3251,86 +3256,42 @@ function DrawPlayer()
         end
     end
 
-    -- 近战挥击2D特效(刀光扇形 + 速度线 + 冲击波)
+    -- 近战挥击特效(序列帧动画 + 跟随朝向旋转)
     if player.meleeSwingTimer > 0 then
-        local t = 1.0 - (player.meleeSwingTimer / player.meleeSwingDur) -- 0→1
-        local meleeR = player.meleeRange + player.radius
-        local halfArc = player.meleeArc * 0.5
+        local rawT = 1.0 - (player.meleeSwingTimer / player.meleeSwingDur) -- 0→1
+        -- 非线性帧选择: easeOutQuad 让前半段帧切换更快
+        local easedT = 1.0 - (1.0 - rawT) * (1.0 - rawT)
+        local frameIdx = math.floor(easedT * SLASH_FRAME_COUNT) + 1
+        if frameIdx > SLASH_FRAME_COUNT then frameIdx = SLASH_FRAME_COUNT end
+        local frameImg = imgSlashFrames[frameIdx]
 
-        -- 阶段1: 扇形刀光(从一侧扫到另一侧)
-        local sweepAngle = player.angle - halfArc + t * player.meleeArc
-        local fadeAlpha = t < 0.7 and 1.0 or (1.0 - (t - 0.7) / 0.3) -- 后30%淡出
-        local alpha = math.floor(220 * fadeAlpha)
+        -- 透明度: 前70%满亮, 后30%淡出
+        local alpha = rawT < 0.7 and 1.0 or (1.0 - (rawT - 0.7) / 0.3)
+        -- 缩放: 快速弹出后稳定
+        local scaleT = math.min(rawT / 0.15, 1.0)
+        local scale = 0.6 + 0.4 * (1.0 - (1.0 - scaleT) * (1.0 - scaleT))
+
+        -- 序列帧原始尺寸 126x150, 渲染尺寸
+        local meleeR = player.meleeRange + player.radius
+        local drawSize = meleeR * 2.0 * scale
+        local drawW = drawSize
+        local drawH = drawSize * (150 / 126) -- 保持宽高比
 
         nvgSave(vg)
         nvgTranslate(vg, px, py)
+        -- 旋转到玩家朝向(素材默认弧形朝右, 需要偏移让刀光居中于攻击方向)
+        nvgRotate(vg, player.angle + math.pi * 0.5)
 
-        -- 扇形填充(渐变: 内白外橙)
-        local startA = player.angle - halfArc
-        local currentEndA = startA + t * player.meleeArc
+        -- 渲染序列帧(锚点在角色中心, 刀光向前方偏移)
+        local offsetX = -drawW * 0.5
+        local offsetY = -drawH * 0.85  -- 刀光主体在角色前方
+        local imgPat = nvgImagePattern(vg,
+            offsetX, offsetY, drawW, drawH,
+            0, frameImg, alpha)
         nvgBeginPath(vg)
-        nvgMoveTo(vg, 0, 0)
-        nvgArc(vg, 0, 0, meleeR, startA, currentEndA, NVG_CW)
-        nvgClosePath(vg)
-        nvgFillColor(vg, nvgRGBA(255, 240, 200, math.floor(alpha * 0.25)))
+        nvgRect(vg, offsetX, offsetY, drawW, drawH)
+        nvgFillPaint(vg, imgPat)
         nvgFill(vg)
-
-        -- 刀光前沿弧线(粗亮线)
-        local trailLen = 0.35  -- 拖尾弧度长
-        local trailStart = math.max(startA, currentEndA - trailLen)
-        nvgBeginPath(vg)
-        nvgArc(vg, 0, 0, meleeR, trailStart, currentEndA, NVG_CW)
-        nvgStrokeColor(vg, nvgRGBA(255, 255, 255, alpha))
-        nvgStrokeWidth(vg, 4)
-        nvgLineCap(vg, NVG_ROUND)
-        nvgStroke(vg)
-
-        -- 刀光前沿发光(稍大半径, 半透明橙)
-        nvgBeginPath(vg)
-        nvgArc(vg, 0, 0, meleeR + 3, trailStart, currentEndA, NVG_CW)
-        nvgStrokeColor(vg, nvgRGBA(255, 180, 60, math.floor(alpha * 0.6)))
-        nvgStrokeWidth(vg, 6)
-        nvgLineCap(vg, NVG_ROUND)
-        nvgStroke(vg)
-
-        -- 内弧拖影(较短, 更亮)
-        nvgBeginPath(vg)
-        nvgArc(vg, 0, 0, meleeR * 0.55, trailStart, currentEndA, NVG_CW)
-        nvgStrokeColor(vg, nvgRGBA(255, 220, 150, math.floor(alpha * 0.5)))
-        nvgStrokeWidth(vg, 2)
-        nvgStroke(vg)
-
-        -- 速度线(沿扇形边缘散射)
-        if t < 0.6 then
-            local lineAlpha = math.floor(180 * (1.0 - t / 0.6))
-            for i = 1, 5 do
-                local a = currentEndA - math.random() * 0.3
-                local r1 = meleeR * (0.5 + math.random() * 0.3)
-                local r2 = meleeR * (0.85 + math.random() * 0.2)
-                local x1 = math.cos(a) * r1
-                local y1 = math.sin(a) * r1
-                local x2 = math.cos(a) * r2
-                local y2 = math.sin(a) * r2
-                nvgBeginPath(vg)
-                nvgMoveTo(vg, x1, y1)
-                nvgLineTo(vg, x2, y2)
-                nvgStrokeColor(vg, nvgRGBA(255, 255, 220, lineAlpha))
-                nvgStrokeWidth(vg, 1.5)
-                nvgStroke(vg)
-            end
-        end
-
-        -- 冲击波圆环(挥击到一半时扩散)
-        if t > 0.4 and t < 0.9 then
-            local waveT = (t - 0.4) / 0.5  -- 0→1
-            local waveR = meleeR * (0.6 + waveT * 0.6)
-            local waveAlpha = math.floor(120 * (1.0 - waveT))
-            nvgBeginPath(vg)
-            nvgArc(vg, 0, 0, waveR, startA, startA + player.meleeArc, NVG_CW)
-            nvgStrokeColor(vg, nvgRGBA(255, 200, 100, waveAlpha))
-            nvgStrokeWidth(vg, 2)
-            nvgStroke(vg)
-        end
 
         nvgRestore(vg)
     end

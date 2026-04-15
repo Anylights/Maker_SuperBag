@@ -267,6 +267,14 @@ function Start()
         elite  = nvgCreateImage(vg, "image/wolf_elite_white.png", 0),
         boss   = nvgCreateImage(vg, "image/wolf_boss_white.png", 0),
     }
+    imgEnemiesRed = {
+        patrol = nvgCreateImage(vg, "image/wolf_patrol_red.png", 0),
+        sentry = nvgCreateImage(vg, "image/wolf_sentry_red.png", 0),
+        rusher = nvgCreateImage(vg, "image/wolf_rusher_red.png", 0),
+        heavy  = nvgCreateImage(vg, "image/wolf_heavy_red.png", 0),
+        elite  = nvgCreateImage(vg, "image/wolf_elite_red.png", 0),
+        boss   = nvgCreateImage(vg, "image/wolf_boss_red.png", 0),
+    }
     -- 加载地形瓦片图片
     imgFloorTiles = {
         nvgCreateImage(vg, "image/tiles32/floor_0.png", 0),
@@ -2886,31 +2894,21 @@ local function DrawWhiteOutline(whiteImg, halfSize, imgSize)
     end
 end
 
---- 绘制红色轮廓描边(用于敌人, 与主角白色描边同理, 用白色剪影在8方向偏移再染红)
-local function DrawRedOutline(whiteImg, halfSize, imgSize)
-    if not whiteImg or whiteImg < 0 then return end
+-- 绘制红色轮廓描边(用于敌人, 直接用预生成的红色剪影图片, 与白色描边完全同理)
+local function DrawRedOutline(redImg, halfSize, imgSize)
+    if not redImg or redImg < 0 then return end
     local offDist = 1.5  -- 描边宽度(像素)
     local dirs = {
         {1,0}, {-1,0}, {0,1}, {0,-1},
         {0.707,0.707}, {-0.707,0.707}, {0.707,-0.707}, {-0.707,-0.707},
     }
-    -- 逐方向绘制: 每个方向单独 save/restore 隔离合成操作
     for _, d in ipairs(dirs) do
         local ox, oy = d[1] * offDist, d[2] * offDist
-        nvgSave(vg)
-        -- 1) 先画白色剪影(带alpha通道, 只有角色形状部分不透明)
-        local paint = nvgImagePattern(vg, -halfSize + ox, -halfSize + oy, imgSize, imgSize, 0, whiteImg, 1.0)
+        local paint = nvgImagePattern(vg, -halfSize + ox, -halfSize + oy, imgSize, imgSize, 0, redImg, 1.0)
         nvgBeginPath(vg)
         nvgRect(vg, -halfSize + ox, -halfSize + oy, imgSize, imgSize)
         nvgFillPaint(vg, paint)
         nvgFill(vg)
-        -- 2) 用 ATOP 在白色剪影像素上染红色(透明区域不受影响)
-        nvgGlobalCompositeOperation(vg, NVG_ATOP)
-        nvgBeginPath(vg)
-        nvgRect(vg, -halfSize + ox, -halfSize + oy, imgSize, imgSize)
-        nvgFillColor(vg, nvgRGBA(255, 40, 40, 220))
-        nvgFill(vg)
-        nvgRestore(vg)
     end
 end
 
@@ -3097,9 +3095,9 @@ function DrawEnemies()
                 nvgScale(vg, -1, 1)
             end
 
-            -- 先绘制红色轮廓描边(贴合角色轮廓, 用白色剪影偏移+红色染色)
-            local eWhiteImg = imgEnemiesWhite[e.typeKey] or imgEnemiesWhite["patrol"] or -1
-            DrawRedOutline(eWhiteImg, halfSize, imgSize)
+            -- 先绘制红色轮廓描边(贴合角色轮廓, 用预生成的红色剪影图片)
+            local eRedImg = imgEnemiesRed[e.typeKey] or imgEnemiesRed["patrol"] or -1
+            DrawRedOutline(eRedImg, halfSize, imgSize)
 
             -- 再绘制敌人本体
             local paint = nvgImagePattern(vg, -halfSize, -halfSize, imgSize, imgSize, 0, eImg, 1.0)

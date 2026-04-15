@@ -1,6 +1,7 @@
 -- ============================================================================
 -- 背包UI渲染模块
 -- NanoVG绘制、拖拽交互、放置预览、石板高亮、属性面板
+-- 拾取物品在面板左侧显示，可拖入背包；从背包拖出面板丢弃
 -- ============================================================================
 
 local Data = require("inventory_data")
@@ -15,37 +16,42 @@ UI.isOpen = false             -- 背包是否打开
 UI.dragItem = nil             -- 当前拖拽的物品
 UI.dragOffsetX = 0            -- 拖拽偏移(鼠标相对物品左上角)
 UI.dragOffsetY = 0
+UI.dragSource = nil           -- 拖拽来源: "grid" | "pickup"
+UI.dragLootRef = nil          -- 若来自pickup, 对应的lootItem引用
 UI.hoverItem = nil            -- 鼠标悬停的物品
 UI.hoverCol = 0               -- 鼠标悬停的格子坐标
 UI.hoverRow = 0
-UI.selectedPendingIndex = 0   -- 待放入列表选中索引
 UI.animAlpha = 0              -- 打开/关闭动画alpha
 UI.onDiscardItem = nil        -- 丢弃回调: function(item) → 由main.lua设置
+UI.onPickupPlaced = nil       -- 拾取物品放入背包回调: function(lootRef) → main.lua从lootItems移除
+
+-- 拾取物品列表: { {item=inventoryItem, lootRef=lootItemRef}, ... }
+-- item: 背包物品实例(可拖拽放入格子)
+-- lootRef: 对应地面lootItems中的条目(放入格子后需从lootItems移除)
+-- 若lootRef为nil, 表示从格子拖出的物品(关闭背包时丢弃到地面)
+UI.pickupItems = {}
 
 -- 布局参数(在Draw中根据屏幕尺寸动态计算)
 local gridOriginX = 0         -- 格子区域左上角屏幕坐标
 local gridOriginY = 0
 local cellSize = Data.CELL_SIZE
-local pendingAreaX = 0
-local pendingAreaY = 0
 local statsAreaX = 0
 local statsAreaY = 0
 local panelX_ = 0             -- 面板边界(用于丢弃判定)
 local panelY_ = 0
 local panelW_ = 0
 local panelH_ = 0
+local pickupAreaX_ = 0        -- 拾取物品区域左上角
+local pickupAreaY_ = 0
 
 -- ============================================================================
 -- 打开/关闭
 -- ============================================================================
 function UI.Toggle()
-    UI.isOpen = not UI.isOpen
-    UI.dragItem = nil
-    UI.hoverItem = nil
-    UI.selectedPendingIndex = 0
-
     if UI.isOpen then
-        UI.animAlpha = 0
+        UI.Close()
+    else
+        UI.Open()
     end
 end
 
@@ -53,6 +59,8 @@ function UI.Open()
     if not UI.isOpen then
         UI.isOpen = true
         UI.dragItem = nil
+        UI.dragSource = nil
+        UI.dragLootRef = nil
         UI.animAlpha = 0
     end
 end
@@ -61,6 +69,36 @@ function UI.Close()
     if UI.isOpen then
         UI.isOpen = false
         UI.dragItem = nil
+        UI.dragSource = nil
+        UI.dragLootRef = nil
+        -- 关闭背包时, 从格子拖出但未放回的物品(lootRef==nil)丢到地面
+        for i = #UI.pickupItems, 1, -1 do
+            local entry = UI.pickupItems[i]
+            if entry.lootRef == nil and UI.onDiscardItem then
+                -- 这个物品原本在格子里, 被拖出后放在拾取区, 现在关闭背包需要丢到地上
+                UI.onDiscardItem(entry.item)
+            end
+            -- lootRef ~= nil 的物品仍在地面lootItems中, 不需要处理
+        end
+        UI.pickupItems = {}
+    end
+end
+
+--- 设置可拾取物品(由main.lua在按F时调用)
+--- items: { {item=inventoryItem, lootRef=lootItemEntry}, ... }
+function UI.SetPickupItems(items)
+    UI.pickupItems = items or {}
+end
+
+--- 添加单个物品到拾取区(从格子拖出时使用)
+function UI.AddToPickup(item, lootRef)
+    table.insert(UI.pickupItems, {item = item, lootRef = lootRef})
+end
+
+--- 从拾取列表移除指定索引
+function UI.RemovePickupAt(index)
+    if index >= 1 and index <= #UI.pickupItems then
+        table.remove(UI.pickupItems, index)
     end
 end
 
@@ -78,8 +116,10 @@ function UI.HandleMouseDown(mx, my, button)
         if col >= 1 and col <= Inv.cols and row >= 1 and row <= Inv.rows then
             local item = Inv.GetItemAt(col, row)
             if item then
-                -- 开始拖拽
+                -- 开始拖拽(从格子)
                 UI.dragItem = item
+                UI.dragSource = "grid"
+                UI.dragLootRef = nil
                 local itemX = gridOriginX + (item.gridCol - 1) * cellSize
                 local itemY = gridOriginY + (item.gridRow - 1) * cellSize
                 UI.dragOffsetX = mx - itemX
@@ -90,14 +130,16 @@ function UI.HandleMouseDown(mx, my, button)
             end
         end
 
-        -- 检查是否点击了待放入列表中的物品
-        local pendingIdx = UI.GetPendingItemAt(mx, my)
-        if pendingIdx > 0 then
-            local item = Inv.pendingItems[pendingIdx]
-            UI.dragItem = item
-            -- 从待放入列表移除以开始拖拽
-            table.remove(Inv.pendingItems, pendingIdx)
-            local w, h = Inv.GetItemSize(item)
+        -- 检查是否点击了拾取区的物品
+        local pickupIdx = UI.GetPickupItemAt(mx, my)
+        if pickupIdx > 0 then
+            local entry = UI.pickupItems[pickupIdx]
+            UI.dragItem = entry.item
+            UI.dragSource = "pickup"
+            UI.dragLootRef = entry.lootRef
+            -- 从拾取列表移除(开始拖拽)
+            table.remove(UI.pickupItems, pickupIdx)
+            local w, h = Inv.GetItemSize(entry.item)
             UI.dragOffsetX = w * cellSize / 2
             UI.dragOffsetY = h * cellSize / 2
             return true
@@ -128,7 +170,11 @@ function UI.HandleMouseUp(mx, my, button)
 
     if button == MOUSEB_LEFT and UI.dragItem then
         local item = UI.dragItem
+        local source = UI.dragSource
+        local lootRef = UI.dragLootRef
         UI.dragItem = nil
+        UI.dragSource = nil
+        UI.dragLootRef = nil
 
         -- 尝试放置到格子
         local col, row = UI.ScreenToGrid(mx, my)
@@ -142,19 +188,32 @@ function UI.HandleMouseUp(mx, my, button)
 
         if Inv.CanPlace(item, placeCol, placeRow) then
             Inv.PlaceItem(item, placeCol, placeRow)
+            -- 如果是从地面拾取的物品, 通知main.lua从lootItems移除
+            if source == "pickup" and lootRef and UI.onPickupPlaced then
+                UI.onPickupPlaced(lootRef)
+            end
         else
             -- 检查鼠标是否在面板外 → 丢弃物品
             local outsidePanel = mx < panelX_ or mx > panelX_ + panelW_
-                              or my < panelY_ or my > panelY_ + panelH_ + 60
+                              or my < panelY_ or my > panelY_ + panelH_
             if outsidePanel then
-                -- 丢弃: 从背包移除并通知主模块
-                Inv.DiscardItem(item)
-                if UI.onDiscardItem then
-                    UI.onDiscardItem(item)
+                if source == "pickup" then
+                    -- 从拾取区拖出面板外: 放回拾取区(物品仍在地面)
+                    UI.AddToPickup(item, lootRef)
+                else
+                    -- 从格子拖出面板外: 丢弃到地面
+                    Inv.DiscardItem(item)
+                    if UI.onDiscardItem then
+                        UI.onDiscardItem(item)
+                    end
                 end
             else
-                -- 面板内但放不下 → 加回待放入列表
-                Inv.AddPendingItem(item)
+                -- 面板内但放不下 → 放入拾取区(可再次拖拽)
+                local returnLootRef = lootRef  -- 保留原始lootRef
+                if source == "grid" then
+                    returnLootRef = nil  -- 格子物品没有地面引用
+                end
+                UI.AddToPickup(item, returnLootRef)
             end
         end
 
@@ -196,22 +255,22 @@ function UI.GridToScreen(col, row)
     return gridOriginX + (col - 1) * cellSize, gridOriginY + (row - 1) * cellSize
 end
 
---- 检查鼠标是否在待放入列表的物品上, 返回索引(0=无)
-function UI.GetPendingItemAt(mx, my)
-    local x = pendingAreaX
-    local y = pendingAreaY + 28  -- 标题高度
+--- 检查鼠标是否在拾取区的物品上, 返回索引(0=无)
+function UI.GetPickupItemAt(mx, my)
+    local x = pickupAreaX_
+    local y = pickupAreaY_
 
-    for i, item in ipairs(Inv.pendingItems) do
+    for i, entry in ipairs(UI.pickupItems) do
+        local item = entry.item
         local w, h = Inv.GetItemSize(item)
-        local pw = w * cellSize * 0.6  -- 缩小显示
-        local ph = h * cellSize * 0.6
+        local pw = w * cellSize
+        local ph = h * cellSize
 
         if mx >= x and mx <= x + pw and my >= y and my <= y + ph then
             return i
         end
 
-        y = y + ph + 4
-        if y > pendingAreaY + 300 then break end  -- 限制显示数量
+        y = y + ph + 6
     end
 
     return 0
@@ -233,7 +292,7 @@ function UI.Draw(nvg, logicalW, logicalH, mouseX, mouseY)
     local gridW = Inv.cols * cellSize
     local gridH = Inv.rows * cellSize
     local panelW = gridW + 240  -- 格子 + 右侧属性面板
-    local panelH = math.max(gridH + 80, 380)
+    local panelH = gridH + 60
 
     -- 面板居中
     local panelX = (logicalW - panelW) / 2
@@ -253,9 +312,9 @@ function UI.Draw(nvg, logicalW, logicalH, mouseX, mouseY)
     statsAreaX = gridOriginX + gridW + 16
     statsAreaY = gridOriginY
 
-    -- 待放入物品区域(格子下方)
-    pendingAreaX = gridOriginX
-    pendingAreaY = gridOriginY + gridH + 12
+    -- 拾取物品区域(面板左侧)
+    pickupAreaX_ = panelX - cellSize * 2.5 - 16
+    pickupAreaY_ = panelY + 50
 
     -- 更新悬停状态
     UI.hoverCol, UI.hoverRow = UI.ScreenToGrid(mouseX, mouseY)
@@ -320,8 +379,8 @@ function UI.Draw(nvg, logicalW, logicalH, mouseX, mouseY)
     -- === 10. 激活的Combo ===
     UI.DrawCombos(nvg, alpha)
 
-    -- === 11. 待放入物品 ===
-    UI.DrawPendingItems(nvg, alpha)
+    -- === 11. 拾取区物品(面板左侧) ===
+    UI.DrawPickupItems(nvg, alpha)
 
     -- === 12. 操作提示 ===
     nvgFontSize(nvg, 10)
@@ -511,15 +570,15 @@ function UI.DrawDragPreview(nvg, mouseX, mouseY, alpha)
         end
     end
 
-    -- 检测是否在面板外(丢弃区域)
+    -- 检测是否在面板外(丢弃区域) —— 仅格子来源的物品显示丢弃提示
     local outsidePanel = mouseX < panelX_ or mouseX > panelX_ + panelW_
-                      or mouseY < panelY_ or mouseY > panelY_ + panelH_ + 60
+                      or mouseY < panelY_ or mouseY > panelY_ + panelH_
 
     -- 跟随鼠标的物品(半透明)
     local drawX = mouseX - UI.dragOffsetX
     local drawY = mouseY - UI.dragOffsetY
     nvgSave(nvg)
-    if outsidePanel then
+    if outsidePanel and UI.dragSource == "grid" then
         nvgGlobalAlpha(nvg, 0.4)
     else
         nvgGlobalAlpha(nvg, 0.75)
@@ -527,8 +586,8 @@ function UI.DrawDragPreview(nvg, mouseX, mouseY, alpha)
     UI.DrawItem(nvg, item, drawX, drawY, 1.0, alpha)
     nvgRestore(nvg)
 
-    -- 面板外: 显示丢弃提示
-    if outsidePanel then
+    -- 面板外: 显示丢弃提示(仅格子来源)
+    if outsidePanel and UI.dragSource == "grid" then
         nvgFontFace(nvg, "sans")
         nvgFontSize(nvg, 11)
         nvgTextAlign(nvg, NVG_ALIGN_CENTER + NVG_ALIGN_TOP)
@@ -715,39 +774,47 @@ function UI.DrawCombos(nvg, alpha)
     end
 end
 
-function UI.DrawPendingItems(nvg, alpha)
-    if #Inv.pendingItems == 0 then return end
+--- 绘制拾取区物品(面板左侧, 可拖入背包)
+function UI.DrawPickupItems(nvg, alpha)
+    if #UI.pickupItems == 0 then return end
 
-    local x = pendingAreaX
-    local y = pendingAreaY
+    local x = pickupAreaX_
+    local y = pickupAreaY_
 
     -- 标题
     nvgFontFace(nvg, "sans")
     nvgFontSize(nvg, 12)
-    nvgTextAlign(nvg, NVG_ALIGN_LEFT + NVG_ALIGN_TOP)
+    nvgTextAlign(nvg, NVG_ALIGN_CENTER + NVG_ALIGN_TOP)
     nvgFillColor(nvg, nvgRGBA(255, 200, 80, math.floor(240 * alpha)))
-    nvgText(nvg, x, y, "待放入 (" .. #Inv.pendingItems .. ")", nil)
-    y = y + 20
+    nvgText(nvg, x + cellSize, y - 20, "可拾取", nil)
 
-    -- 横排显示
-    local drawX = x
-    for i, item in ipairs(Inv.pendingItems) do
+    -- 竖排显示每个物品
+    for i, entry in ipairs(UI.pickupItems) do
+        local item = entry.item
         local w, h = Inv.GetItemSize(item)
-        local pw = w * cellSize * 0.6
-        local ph = h * cellSize * 0.6
+        local pw = w * cellSize
+        local ph = h * cellSize
 
-        -- 缩小绘制
-        nvgSave(nvg)
-        UI.DrawItem(nvg, item, drawX, y, 0.6, alpha)
-        nvgRestore(nvg)
+        -- 物品背景区域(淡色底板)
+        nvgBeginPath(nvg)
+        nvgRoundedRect(nvg, x - 2, y - 2, pw + 4, ph + 4, 5)
+        nvgFillColor(nvg, nvgRGBA(20, 22, 30, math.floor(180 * alpha)))
+        nvgFill(nvg)
+        nvgStrokeColor(nvg, nvgRGBA(255, 200, 80, math.floor(100 * alpha)))
+        nvgStrokeWidth(nvg, 1)
+        nvgStroke(nvg)
 
-        drawX = drawX + pw + 6
-        if drawX > gridOriginX + Inv.cols * cellSize - 40 then
-            drawX = x
-            y = y + ph + 6
-        end
+        -- 绘制物品
+        UI.DrawItem(nvg, item, x, y, 1.0, alpha)
 
-        if i >= 10 then break end  -- 最多显示10个
+        -- 拖拽提示箭头 →
+        nvgFontSize(nvg, 14)
+        nvgTextAlign(nvg, NVG_ALIGN_LEFT + NVG_ALIGN_MIDDLE)
+        nvgFillColor(nvg, nvgRGBA(255, 200, 80, math.floor(140 * alpha)))
+        nvgText(nvg, x + pw + 6, y + ph / 2, "→", nil)
+
+        y = y + ph + 10
+        if i >= 8 then break end  -- 最多显示8个
     end
 end
 

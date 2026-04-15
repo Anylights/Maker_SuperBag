@@ -12,7 +12,6 @@ local Inv = {}
 -- ============================================================================
 Inv.grid = {}            -- grid[r][c] = nil | {type="artifact"|"tablet", itemRef=item}
 Inv.items = {}           -- 所有已放置的物品列表
-Inv.pendingItems = {}    -- 未放入背包的物品(等待放入)
 Inv.cols = Data.GRID_COLS
 Inv.rows = Data.GRID_ROWS
 
@@ -35,7 +34,6 @@ function Inv.Init()
         end
     end
     Inv.items = {}
-    Inv.pendingItems = {}
     Inv.bonusStats = {}
     Inv.activeCombos = {}
     Inv.tagCounts = {}
@@ -180,14 +178,6 @@ function Inv.PlaceItem(item, col, row)
         table.insert(Inv.items, item)
     end
 
-    -- 从待放入列表中移除
-    for i = #Inv.pendingItems, 1, -1 do
-        if Inv.pendingItems[i] == item then
-            table.remove(Inv.pendingItems, i)
-            break
-        end
-    end
-
     -- 重新计算属性
     Inv.RecalculateStats()
 
@@ -222,9 +212,6 @@ function Inv.RemoveItem(item)
             break
         end
     end
-
-    -- 加入待放入列表
-    table.insert(Inv.pendingItems, item)
 
     -- 重新计算属性
     Inv.RecalculateStats()
@@ -261,13 +248,6 @@ end
 function Inv.DiscardItem(item)
     if item.placed then
         Inv.RemoveItem(item)
-    end
-    -- 从待放入列表也移除
-    for i = #Inv.pendingItems, 1, -1 do
-        if Inv.pendingItems[i] == item then
-            table.remove(Inv.pendingItems, i)
-            break
-        end
     end
 end
 
@@ -507,18 +487,6 @@ function Inv.GetStatSummary()
     end
 
     return lines
-end
-
--- ============================================================================
--- 添加物品到待放入列表
--- ============================================================================
-function Inv.AddPendingItem(item)
-    table.insert(Inv.pendingItems, item)
-end
-
---- 获取待放入物品数量
-function Inv.GetPendingCount()
-    return #Inv.pendingItems
 end
 
 return Inv

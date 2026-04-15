@@ -128,7 +128,7 @@ local ENEMY_TYPES = {
         hp = 100, speed = 60, damage = 10, radius = 12,
         color = {200, 80, 80},
         sightRange = 200, attackRange = 180, attackRate = 0.8,
-        bulletSpeed = 350,
+        bulletSpeed = 280,
         attackPattern = "single",  -- 单发
     },
     sentry = {
@@ -136,7 +136,7 @@ local ENEMY_TYPES = {
         hp = 85, speed = 0, damage = 12, radius = 14,
         color = {80, 80, 200},
         sightRange = 280, attackRange = 260, attackRate = 1.8,
-        bulletSpeed = 400,
+        bulletSpeed = 330,
         attackPattern = "burst",   -- 三连发
         burstCount = 3,            -- 每次连发3颗
         burstInterval = 0.1,       -- 连发间隔(秒)
@@ -154,7 +154,7 @@ local ENEMY_TYPES = {
         hp = 260, speed = 35, damage = 8, radius = 16,
         color = {100, 100, 120},
         sightRange = 220, attackRange = 160, attackRate = 2.2,
-        bulletSpeed = 280,
+        bulletSpeed = 240,
         attackPattern = "shotgun",  -- 散弹(4发扇形)
         shotgunPellets = 4,         -- 弹丸数
         shotgunSpread = 0.35,       -- 扇形半角(弧度, ±20°)
@@ -165,7 +165,7 @@ local ENEMY_TYPES = {
         hp = 400, speed = 50, damage = 15, radius = 18,
         color = {180, 50, 50},
         sightRange = 240, attackRange = 200, attackRate = 1.5,
-        bulletSpeed = 380,
+        bulletSpeed = 320,
         attackPattern = "burst",    -- 三连发
         burstCount = 3,
         burstInterval = 0.08,
@@ -1549,6 +1549,19 @@ function HandleUpdate(eventType, eventData)
                             life = 0.8, maxLife = 0.8,
                             vy = -40,
                         })
+                        -- 命中火花粒子(扇形方向喷射)
+                        local hitAngle = math.atan(dy, dx)
+                        for k = 1, 8 do
+                            local pa = hitAngle + (math.random() - 0.5) * 1.0
+                            local spd = 80 + math.random() * 120
+                            table.insert(particles, {
+                                x = e.x, y = e.y,
+                                vx = math.cos(pa) * spd, vy = math.sin(pa) * spd,
+                                life = 0.2 + math.random() * 0.2, maxLife = 0.4,
+                                r = 255, g = 220 + math.random(35), b = 80 + math.random(80),
+                                size = 2 + math.random() * 2, drag = 0.94,
+                            })
+                        end
                         -- 击退效果
                         local pushAngle = math.atan(dy, dx)
                         local pushForce = 150
@@ -3238,31 +3251,88 @@ function DrawPlayer()
         end
     end
 
-    -- 近战挥击弧线特效
+    -- 近战挥击2D特效(刀光扇形 + 速度线 + 冲击波)
     if player.meleeSwingTimer > 0 then
-        local swingProgress = 1.0 - (player.meleeSwingTimer / player.meleeSwingDur)
-        local swingAlpha = math.floor(255 * (1.0 - swingProgress))
-        local swingRadius = player.meleeRange + player.radius
+        local t = 1.0 - (player.meleeSwingTimer / player.meleeSwingDur) -- 0→1
+        local meleeR = player.meleeRange + player.radius
         local halfArc = player.meleeArc * 0.5
-        -- 扇形从一侧扫到另一侧
-        local sweepOffset = (swingProgress - 0.5) * player.meleeArc * 0.6
-        local arcStart = player.angle - halfArc + sweepOffset
-        local arcEnd = player.angle + halfArc + sweepOffset
 
-        -- 挥击弧线(白色半透明)
+        -- 阶段1: 扇形刀光(从一侧扫到另一侧)
+        local sweepAngle = player.angle - halfArc + t * player.meleeArc
+        local fadeAlpha = t < 0.7 and 1.0 or (1.0 - (t - 0.7) / 0.3) -- 后30%淡出
+        local alpha = math.floor(220 * fadeAlpha)
+
+        nvgSave(vg)
+        nvgTranslate(vg, px, py)
+
+        -- 扇形填充(渐变: 内白外橙)
+        local startA = player.angle - halfArc
+        local currentEndA = startA + t * player.meleeArc
         nvgBeginPath(vg)
-        nvgArc(vg, px, py, swingRadius, arcStart, arcEnd, NVG_CW)
-        nvgStrokeColor(vg, nvgRGBA(255, 255, 255, swingAlpha))
-        nvgStrokeWidth(vg, 3)
+        nvgMoveTo(vg, 0, 0)
+        nvgArc(vg, 0, 0, meleeR, startA, currentEndA, NVG_CW)
+        nvgClosePath(vg)
+        nvgFillColor(vg, nvgRGBA(255, 240, 200, math.floor(alpha * 0.25)))
+        nvgFill(vg)
+
+        -- 刀光前沿弧线(粗亮线)
+        local trailLen = 0.35  -- 拖尾弧度长
+        local trailStart = math.max(startA, currentEndA - trailLen)
+        nvgBeginPath(vg)
+        nvgArc(vg, 0, 0, meleeR, trailStart, currentEndA, NVG_CW)
+        nvgStrokeColor(vg, nvgRGBA(255, 255, 255, alpha))
+        nvgStrokeWidth(vg, 4)
         nvgLineCap(vg, NVG_ROUND)
         nvgStroke(vg)
 
-        -- 内弧(略小, 更亮)
+        -- 刀光前沿发光(稍大半径, 半透明橙)
         nvgBeginPath(vg)
-        nvgArc(vg, px, py, swingRadius * 0.7, arcStart, arcEnd, NVG_CW)
-        nvgStrokeColor(vg, nvgRGBA(255, 240, 200, math.floor(swingAlpha * 0.6)))
+        nvgArc(vg, 0, 0, meleeR + 3, trailStart, currentEndA, NVG_CW)
+        nvgStrokeColor(vg, nvgRGBA(255, 180, 60, math.floor(alpha * 0.6)))
+        nvgStrokeWidth(vg, 6)
+        nvgLineCap(vg, NVG_ROUND)
+        nvgStroke(vg)
+
+        -- 内弧拖影(较短, 更亮)
+        nvgBeginPath(vg)
+        nvgArc(vg, 0, 0, meleeR * 0.55, trailStart, currentEndA, NVG_CW)
+        nvgStrokeColor(vg, nvgRGBA(255, 220, 150, math.floor(alpha * 0.5)))
         nvgStrokeWidth(vg, 2)
         nvgStroke(vg)
+
+        -- 速度线(沿扇形边缘散射)
+        if t < 0.6 then
+            local lineAlpha = math.floor(180 * (1.0 - t / 0.6))
+            for i = 1, 5 do
+                local a = currentEndA - math.random() * 0.3
+                local r1 = meleeR * (0.5 + math.random() * 0.3)
+                local r2 = meleeR * (0.85 + math.random() * 0.2)
+                local x1 = math.cos(a) * r1
+                local y1 = math.sin(a) * r1
+                local x2 = math.cos(a) * r2
+                local y2 = math.sin(a) * r2
+                nvgBeginPath(vg)
+                nvgMoveTo(vg, x1, y1)
+                nvgLineTo(vg, x2, y2)
+                nvgStrokeColor(vg, nvgRGBA(255, 255, 220, lineAlpha))
+                nvgStrokeWidth(vg, 1.5)
+                nvgStroke(vg)
+            end
+        end
+
+        -- 冲击波圆环(挥击到一半时扩散)
+        if t > 0.4 and t < 0.9 then
+            local waveT = (t - 0.4) / 0.5  -- 0→1
+            local waveR = meleeR * (0.6 + waveT * 0.6)
+            local waveAlpha = math.floor(120 * (1.0 - waveT))
+            nvgBeginPath(vg)
+            nvgArc(vg, 0, 0, waveR, startA, startA + player.meleeArc, NVG_CW)
+            nvgStrokeColor(vg, nvgRGBA(255, 200, 100, waveAlpha))
+            nvgStrokeWidth(vg, 2)
+            nvgStroke(vg)
+        end
+
+        nvgRestore(vg)
     end
 end
 

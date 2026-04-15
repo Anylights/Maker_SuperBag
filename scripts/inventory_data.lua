@@ -1,6 +1,6 @@
 -- ============================================================================
 -- 背包数据定义模块
--- 圣物模板、石板模板、Combo规则、稀有度定义
+-- 圣物模板、Combo规则、稀有度定义、俄罗斯方块形状
 -- ============================================================================
 
 local M = {}
@@ -66,49 +66,17 @@ M.TAG_COLORS = {
 }
 
 -- ============================================================================
--- 石板模板类型
--- ============================================================================
-M.TABLET_MASKS = {
-    -- 十字: 上下左右4格 (相对偏移)
-    cross = {
-        name = "邻接十字",
-        offsets = {{0, -1}, {0, 1}, {-1, 0}, {1, 0}},
-    },
-    -- 九宫格: 3x3 周围8格
-    square3 = {
-        name = "九宫格",
-        offsets = {
-            {-1, -1}, {0, -1}, {1, -1},
-            {-1, 0},           {1, 0},
-            {-1, 1},  {0, 1},  {1, 1},
-        },
-    },
-    -- 横条: 同行左右各2格
-    row = {
-        name = "横条",
-        offsets = {{-2, 0}, {-1, 0}, {1, 0}, {2, 0}},
-    },
-    -- 竖条: 同列上下各2格
-    col = {
-        name = "竖条",
-        offsets = {{0, -2}, {0, -1}, {0, 1}, {0, 2}},
-    },
-    -- 对角: 四个对角格
-    diagonal = {
-        name = "角扇区",
-        offsets = {{-1, -1}, {1, -1}, {-1, 1}, {1, 1}},
-    },
-}
-
--- ============================================================================
--- 圣物模板 (MVP: 24个)
+-- 圣物模板 (俄罗斯方块形状)
+-- cells: 格子偏移数组 {{col_off, row_off}, ...}，基准点(0,0)
+-- boundW/boundH: 形状包围盒尺寸(用于旋转计算)
 -- ============================================================================
 M.ARTIFACT_TEMPLATES = {
-    -- ========== 1x1 小型数值圣物 ==========
+    -- ========== 稀有度1: 单格 (monomino) ==========
     {
         id = "a_bullet_core",
         name = "弹芯强化",
-        rarity = 1, sizeW = 1, sizeH = 1,
+        rarity = 1,
+        cells = {{0,0}}, boundW = 1, boundH = 1,
         tags = {"Projectile"},
         baseStats = {damage = 10},
         growthStats = {damage = 4},
@@ -118,7 +86,8 @@ M.ARTIFACT_TEMPLATES = {
     {
         id = "a_quick_hands",
         name = "快手",
-        rarity = 1, sizeW = 1, sizeH = 1,
+        rarity = 1,
+        cells = {{0,0}}, boundW = 1, boundH = 1,
         tags = {"Projectile"},
         baseStats = {fireRate = 0.06},
         growthStats = {fireRate = 0.02},
@@ -128,7 +97,8 @@ M.ARTIFACT_TEMPLATES = {
     {
         id = "a_thick_skin",
         name = "厚皮",
-        rarity = 1, sizeW = 1, sizeH = 1,
+        rarity = 1,
+        cells = {{0,0}}, boundW = 1, boundH = 1,
         tags = {"Survival"},
         baseStats = {maxHp = 25},
         growthStats = {maxHp = 8},
@@ -138,7 +108,8 @@ M.ARTIFACT_TEMPLATES = {
     {
         id = "a_sprint_boots",
         name = "疾行靴",
-        rarity = 1, sizeW = 1, sizeH = 1,
+        rarity = 1,
+        cells = {{0,0}}, boundW = 1, boundH = 1,
         tags = {"Mobility"},
         baseStats = {moveSpeed = 35},
         growthStats = {moveSpeed = 12},
@@ -148,7 +119,8 @@ M.ARTIFACT_TEMPLATES = {
     {
         id = "a_lucky_coin",
         name = "幸运币",
-        rarity = 1, sizeW = 1, sizeH = 1,
+        rarity = 1,
+        cells = {{0,0}}, boundW = 1, boundH = 1,
         tags = {"Economy"},
         baseStats = {lootBonus = 20},
         growthStats = {lootBonus = 8},
@@ -158,19 +130,32 @@ M.ARTIFACT_TEMPLATES = {
     {
         id = "a_crit_lens",
         name = "暴击镜",
-        rarity = 1, sizeW = 1, sizeH = 1,
+        rarity = 1,
+        cells = {{0,0}}, boundW = 1, boundH = 1,
         tags = {"Crit"},
         baseStats = {critChance = 12},
         growthStats = {critChance = 4},
         desc = "暴击率+12%",
         icon = "lens",
     },
+    {
+        id = "a_ammo_belt",
+        name = "弹药带",
+        rarity = 1,
+        cells = {{0,0}}, boundW = 1, boundH = 1,
+        tags = {"Projectile"},
+        baseStats = {totalAmmo = 20},
+        growthStats = {totalAmmo = 10},
+        desc = "总弹药+20",
+        icon = "belt",
+    },
 
-    -- ========== 1x2 常规圣物 ==========
+    -- ========== 稀有度2: 双格/三格 (domino/tromino) ==========
     {
         id = "a_fire_rounds",
         name = "燃烧弹",
-        rarity = 2, sizeW = 1, sizeH = 2,
+        rarity = 2,
+        cells = {{0,0},{1,0}}, boundW = 2, boundH = 1,  -- 横向双格
         tags = {"Burn", "Projectile"},
         baseStats = {damage = 5, burnDamage = 18},
         growthStats = {damage = 2, burnDamage = 6},
@@ -180,7 +165,8 @@ M.ARTIFACT_TEMPLATES = {
     {
         id = "a_frost_rounds",
         name = "冰冻弹",
-        rarity = 2, sizeW = 1, sizeH = 2,
+        rarity = 2,
+        cells = {{0,0},{0,1}}, boundW = 1, boundH = 2,  -- 纵向双格
         tags = {"Frost", "Projectile"},
         baseStats = {damage = 4, slowAmount = 50},
         growthStats = {damage = 2, slowAmount = 10},
@@ -190,7 +176,8 @@ M.ARTIFACT_TEMPLATES = {
     {
         id = "a_shock_coil",
         name = "感电线圈",
-        rarity = 2, sizeW = 1, sizeH = 2,
+        rarity = 2,
+        cells = {{0,0},{1,0},{0,1}}, boundW = 2, boundH = 2,  -- L形三格
         tags = {"Shock"},
         baseStats = {shockChance = 35, shockDamage = 30},
         growthStats = {shockChance = 8, shockDamage = 10},
@@ -200,29 +187,54 @@ M.ARTIFACT_TEMPLATES = {
     {
         id = "a_mag_extend",
         name = "扩容弹匣",
-        rarity = 2, sizeW = 1, sizeH = 2,
+        rarity = 2,
+        cells = {{0,0},{1,0},{2,0}}, boundW = 3, boundH = 1,  -- 横向三格
         tags = {"Projectile"},
         baseStats = {magSize = 10, reloadSpeed = 0.3},
         growthStats = {magSize = 4, reloadSpeed = 0.08},
-        desc = "弹匣+6, 换弹加速",
+        desc = "弹匣+10, 换弹加速",
         icon = "mag",
     },
     {
         id = "a_med_kit",
         name = "急救包",
-        rarity = 2, sizeW = 1, sizeH = 2,
+        rarity = 2,
+        cells = {{0,0},{1,0},{1,1}}, boundW = 2, boundH = 2,  -- 反L形三格
         tags = {"Survival"},
         baseStats = {hpRegen = 4, maxHp = 20},
         growthStats = {hpRegen = 1, maxHp = 8},
-        desc = "每秒回复2HP,最大生命+10",
+        desc = "每秒回复4HP,最大生命+20",
         icon = "medkit",
     },
+    {
+        id = "a_bounce_round",
+        name = "弹跳弹",
+        rarity = 2,
+        cells = {{0,0},{0,1}}, boundW = 1, boundH = 2,  -- 纵向双格
+        tags = {"Projectile"},
+        baseStats = {bounceCount = 2, damage = 4},
+        growthStats = {bounceCount = 1, damage = 2},
+        desc = "子弹撞墙反弹2次,继续追杀敌人",
+        icon = "bounce",
+    },
+    {
+        id = "a_scope",
+        name = "瞄准镜",
+        rarity = 2,
+        cells = {{0,0},{1,0}}, boundW = 2, boundH = 1,  -- 横向双格
+        tags = {"Crit", "Projectile"},
+        baseStats = {critChance = 8, spread = -1},
+        growthStats = {critChance = 3},
+        desc = "暴击率+8%,散布减少",
+        icon = "scope",
+    },
 
-    -- ========== 2x2 核心机制圣物 ==========
+    -- ========== 稀有度3: 四格 (tetromino) ==========
     {
         id = "a_explosive_rounds",
         name = "爆裂弹",
-        rarity = 3, sizeW = 2, sizeH = 2,
+        rarity = 3,
+        cells = {{0,0},{1,0},{2,0},{3,0}}, boundW = 4, boundH = 1,  -- I形
         tags = {"Blast", "Projectile"},
         baseStats = {damage = 12, explosionRadius = 65, explosionDamage = 40},
         growthStats = {damage = 5, explosionDamage = 15},
@@ -232,7 +244,8 @@ M.ARTIFACT_TEMPLATES = {
     {
         id = "a_chain_lightning",
         name = "连锁闪电",
-        rarity = 3, sizeW = 2, sizeH = 2,
+        rarity = 3,
+        cells = {{0,0},{1,0},{0,1},{1,1}}, boundW = 2, boundH = 2,  -- O形
         tags = {"Shock", "Shock"},
         baseStats = {chainCount = 4, chainDamage = 25},
         growthStats = {chainDamage = 8},
@@ -242,17 +255,19 @@ M.ARTIFACT_TEMPLATES = {
     {
         id = "a_blood_pact",
         name = "鲜血契约",
-        rarity = 3, sizeW = 2, sizeH = 2,
+        rarity = 3,
+        cells = {{0,0},{1,0},{2,0},{1,1}}, boundW = 3, boundH = 2,  -- T形
         tags = {"Crit", "Survival"},
         baseStats = {critChance = 18, critDamage = 50, maxHp = -15},
         growthStats = {critChance = 5, critDamage = 15},
-        desc = "暴击率+10%,暴伤+25%,但最大生命-20",
+        desc = "暴击率+18%,暴伤+50%,但最大生命-15",
         icon = "blood",
     },
     {
         id = "a_drone",
         name = "攻击无人机",
-        rarity = 3, sizeW = 2, sizeH = 2,
+        rarity = 3,
+        cells = {{0,0},{1,0},{1,1},{2,1}}, boundW = 3, boundH = 2,  -- S形
         tags = {"Companion"},
         baseStats = {droneDamage = 18, droneRate = 0.7},
         growthStats = {droneDamage = 6, droneRate = -0.1},
@@ -262,19 +277,54 @@ M.ARTIFACT_TEMPLATES = {
     {
         id = "a_piercing_rail",
         name = "穿甲弹",
-        rarity = 3, sizeW = 2, sizeH = 2,
+        rarity = 3,
+        cells = {{1,0},{2,0},{0,1},{1,1}}, boundW = 3, boundH = 2,  -- Z形
         tags = {"Projectile", "Projectile"},
         baseStats = {damage = 18, pierce = 3},
         growthStats = {damage = 6},
         desc = "子弹可穿透3个敌人",
         icon = "rail",
     },
+    {
+        id = "a_shotgun_mod",
+        name = "散弹模组",
+        rarity = 3,
+        cells = {{0,0},{0,1},{0,2},{1,2}}, boundW = 2, boundH = 3,  -- L形
+        tags = {"Projectile", "Blast"},
+        baseStats = {shotgunPellets = 3, damage = 3},
+        growthStats = {shotgunPellets = 1, damage = 1},
+        desc = "额外发射3颗散弹,火力覆盖更广",
+        icon = "shotgun",
+    },
+    {
+        id = "a_shield_gen",
+        name = "能量护盾",
+        rarity = 3,
+        cells = {{1,0},{0,1},{1,1},{1,2}}, boundW = 2, boundH = 3,  -- J形
+        tags = {"Survival", "Survival"},
+        baseStats = {shieldMax = 40, shieldRegen = 5},
+        growthStats = {shieldMax = 15, shieldRegen = 2},
+        desc = "生成40点能量护盾,每秒恢复5点",
+        icon = "shield_gen",
+    },
+    {
+        id = "a_dash_unit",
+        name = "冲刺模组",
+        rarity = 3,
+        cells = {{0,0},{1,0},{0,1},{0,2}}, boundW = 2, boundH = 3,  -- 反L形(四格)
+        tags = {"Mobility", "Mobility"},
+        baseStats = {dashCooldown = -1.0, moveSpeed = 15},
+        growthStats = {moveSpeed = 5},
+        desc = "冲刺CD-1秒,移速+15",
+        icon = "dash",
+    },
 
-    -- ========== 2x3 大型机制件 ==========
+    -- ========== 稀有度4: 五格 (pentomino) ==========
     {
         id = "a_inferno_core",
         name = "炼狱核心",
-        rarity = 4, sizeW = 2, sizeH = 3,
+        rarity = 4,
+        cells = {{0,0},{1,0},{2,0},{1,1},{1,2}}, boundW = 3, boundH = 3,  -- +形(十字)
         tags = {"Burn", "Burn", "Blast"},
         baseStats = {burnDamage = 28, burnDuration = 1.5, explosionOnBurn = true},
         growthStats = {burnDamage = 10},
@@ -284,7 +334,8 @@ M.ARTIFACT_TEMPLATES = {
     {
         id = "a_frost_nova",
         name = "极寒脉冲",
-        rarity = 4, sizeW = 2, sizeH = 3,
+        rarity = 4,
+        cells = {{0,0},{1,0},{2,0},{3,0},{4,0}}, boundW = 5, boundH = 1,  -- I形(五格长条)
         tags = {"Frost", "Frost", "Blast"},
         baseStats = {frostNovaRadius = 80, frostNovaDamage = 45, slowAmount = 70},
         growthStats = {frostNovaDamage = 15},
@@ -294,7 +345,8 @@ M.ARTIFACT_TEMPLATES = {
     {
         id = "a_turret",
         name = "自动炮台",
-        rarity = 4, sizeW = 2, sizeH = 3,
+        rarity = 4,
+        cells = {{0,0},{1,0},{2,0},{0,1},{2,1}}, boundW = 3, boundH = 2,  -- U形
         tags = {"Companion", "Companion"},
         baseStats = {turretDamage = 12, turretRange = 200, turretRate = 0.5},
         growthStats = {turretDamage = 4},
@@ -302,221 +354,33 @@ M.ARTIFACT_TEMPLATES = {
         icon = "turret",
     },
 
-    -- ========== 3x3 传奇核心件 ==========
+    -- ========== 稀有度5: 七格 (heptomino) ==========
     {
         id = "a_storm_caller",
         name = "风暴召唤者",
-        rarity = 5, sizeW = 3, sizeH = 3,
+        rarity = 5,
+        cells = {{1,0},{0,1},{1,1},{2,1},{0,2},{1,2},{2,2}}, boundW = 3, boundH = 3,  -- 大十字/钻石
         tags = {"Shock", "Shock", "Blast", "Blast"},
         baseStats = {stormInterval = 6, stormDamage = 80, stormRadius = 130},
         growthStats = {stormDamage = 30},
-        desc = "每8秒召唤闪电风暴,对范围内敌人造成50伤害",
+        desc = "每6秒召唤闪电风暴,对范围内敌人造成80伤害",
         icon = "storm",
     },
     {
         id = "a_phoenix",
         name = "不死鸟之羽",
-        rarity = 5, sizeW = 3, sizeH = 3,
+        rarity = 5,
+        cells = {{0,0},{2,0},{0,1},{1,1},{2,1},{0,2},{2,2}}, boundW = 3, boundH = 3,  -- H形
         tags = {"Burn", "Survival", "Survival"},
         baseStats = {revive = 1, burnAura = 20, maxHp = 50},
         growthStats = {burnAura = 8, maxHp = 15},
         desc = "死亡时原地复活(1次),身边持续燃烧敌人",
         icon = "phoenix",
     },
-
-    -- ========== 新增: 散弹/弹跳/护盾 ==========
-    {
-        id = "a_shotgun_mod",
-        name = "散弹模组",
-        rarity = 3, sizeW = 2, sizeH = 2,
-        tags = {"Projectile", "Blast"},
-        baseStats = {shotgunPellets = 3, damage = 3},
-        growthStats = {shotgunPellets = 1, damage = 1},
-        desc = "额外发射3颗散弹,火力覆盖更广",
-        icon = "shotgun",
-    },
-    {
-        id = "a_bounce_round",
-        name = "弹跳弹",
-        rarity = 2, sizeW = 1, sizeH = 2,
-        tags = {"Projectile"},
-        baseStats = {bounceCount = 2, damage = 4},
-        growthStats = {bounceCount = 1, damage = 2},
-        desc = "子弹撞墙反弹2次,继续追杀敌人",
-        icon = "bounce",
-    },
-    {
-        id = "a_shield_gen",
-        name = "能量护盾",
-        rarity = 3, sizeW = 2, sizeH = 2,
-        tags = {"Survival", "Survival"},
-        baseStats = {shieldMax = 40, shieldRegen = 5},
-        growthStats = {shieldMax = 15, shieldRegen = 2},
-        desc = "生成40点能量护盾,每秒恢复5点",
-        icon = "shield_gen",
-    },
-
-    -- ========== 额外补充 ==========
-    {
-        id = "a_ammo_belt",
-        name = "弹药带",
-        rarity = 1, sizeW = 1, sizeH = 1,
-        tags = {"Projectile"},
-        baseStats = {totalAmmo = 20},
-        growthStats = {totalAmmo = 10},
-        desc = "总弹药+20",
-        icon = "belt",
-    },
-    {
-        id = "a_scope",
-        name = "瞄准镜",
-        rarity = 2, sizeW = 1, sizeH = 2,
-        tags = {"Crit", "Projectile"},
-        baseStats = {critChance = 8, spread = -1},
-        growthStats = {critChance = 3},
-        desc = "暴击率+8%,散布减少",
-        icon = "scope",
-    },
-    {
-        id = "a_dash_unit",
-        name = "冲刺模组",
-        rarity = 3, sizeW = 2, sizeH = 2,
-        tags = {"Mobility", "Mobility"},
-        baseStats = {dashCooldown = -1.0, moveSpeed = 15},
-        growthStats = {moveSpeed = 5},
-        desc = "冲刺CD-1秒,移速+15",
-        icon = "dash",
-    },
 }
 
 -- ============================================================================
--- 石板模板 (MVP: 12个)
--- ============================================================================
-M.TABLET_TEMPLATES = {
-    {
-        id = "t_atk_cross",
-        name = "攻击十字",
-        rarity = 2, sizeW = 1, sizeH = 1,
-        maskType = "cross",
-        bonusStats = {damage = 3},
-        penaltyStats = nil,
-        desc = "十字范围内圣物: 伤害+3",
-        color = {255, 100, 80},
-    },
-    {
-        id = "t_def_cross",
-        name = "防御十字",
-        rarity = 2, sizeW = 1, sizeH = 1,
-        maskType = "cross",
-        bonusStats = {maxHp = 8},
-        penaltyStats = nil,
-        desc = "十字范围内圣物: 最大生命+8",
-        color = {80, 200, 120},
-    },
-    {
-        id = "t_crit_cross",
-        name = "暴击十字",
-        rarity = 3, sizeW = 1, sizeH = 1,
-        maskType = "cross",
-        bonusStats = {critChance = 4},
-        penaltyStats = {moveSpeed = -5},
-        desc = "十字内暴击+4%, 但移速-5",
-        color = {255, 80, 120},
-    },
-    {
-        id = "t_burn_square",
-        name = "灼烧方阵",
-        rarity = 3, sizeW = 1, sizeH = 1,
-        maskType = "square3",
-        bonusStats = {burnDamage = 5},
-        penaltyStats = nil,
-        desc = "九宫格范围: 燃烧伤害+5",
-        color = {255, 140, 40},
-    },
-    {
-        id = "t_frost_square",
-        name = "冰封方阵",
-        rarity = 3, sizeW = 1, sizeH = 1,
-        maskType = "square3",
-        bonusStats = {slowAmount = 10},
-        penaltyStats = nil,
-        desc = "九宫格范围: 减速+10%",
-        color = {80, 180, 255},
-    },
-    {
-        id = "t_speed_row",
-        name = "疾风横带",
-        rarity = 2, sizeW = 1, sizeH = 1,
-        maskType = "row",
-        bonusStats = {fireRate = 0.02, moveSpeed = 10},
-        penaltyStats = nil,
-        desc = "同行圣物: 射速+, 移速+10",
-        color = {120, 220, 255},
-    },
-    {
-        id = "t_power_col",
-        name = "力量纵带",
-        rarity = 2, sizeW = 1, sizeH = 1,
-        maskType = "col",
-        bonusStats = {damage = 4},
-        penaltyStats = nil,
-        desc = "同列圣物: 伤害+4",
-        color = {255, 180, 80},
-    },
-    {
-        id = "t_glass_cannon",
-        name = "玻璃大炮",
-        rarity = 4, sizeW = 1, sizeH = 1,
-        maskType = "square3",
-        bonusStats = {damage = 8, critDamage = 15},
-        penaltyStats = {maxHp = -10},
-        desc = "九宫格: 伤害+8,暴伤+15%,但生命-10",
-        color = {255, 60, 200},
-    },
-    {
-        id = "t_regen_diagonal",
-        name = "回生角石",
-        rarity = 3, sizeW = 1, sizeH = 1,
-        maskType = "diagonal",
-        bonusStats = {hpRegen = 1.5},
-        penaltyStats = nil,
-        desc = "对角圣物: 每秒回复1.5HP",
-        color = {80, 255, 160},
-    },
-    {
-        id = "t_ammo_cross",
-        name = "弹药十字",
-        rarity = 2, sizeW = 1, sizeH = 1,
-        maskType = "cross",
-        bonusStats = {magSize = 3, reloadSpeed = 0.1},
-        penaltyStats = nil,
-        desc = "十字范围: 弹匣+3, 换弹加速",
-        color = {220, 200, 80},
-    },
-    {
-        id = "t_shock_row",
-        name = "雷电横带",
-        rarity = 3, sizeW = 1, sizeH = 1,
-        maskType = "row",
-        bonusStats = {shockChance = 8, shockDamage = 6},
-        penaltyStats = {maxHp = -5},
-        desc = "同行: 感电率+8%,感电伤害+6, 生命-5",
-        color = {220, 220, 80},
-    },
-    {
-        id = "t_blast_col",
-        name = "爆破纵带",
-        rarity = 3, sizeW = 1, sizeH = 1,
-        maskType = "col",
-        bonusStats = {explosionDamage = 10, explosionRadius = 10},
-        penaltyStats = nil,
-        desc = "同列: 爆炸伤害+10, 爆炸范围+10",
-        color = {255, 100, 60},
-    },
-}
-
--- ============================================================================
--- Combo (组合技) 模板 (MVP: 10条)
+-- Combo (组合技) 模板 (MVP: 10条) - 保持不变
 -- ============================================================================
 M.COMBO_TEMPLATES = {
     {
@@ -627,26 +491,19 @@ M.COMBO_TEMPLATES = {
 }
 
 -- ============================================================================
--- 背包初始配置
+-- 背包配置 (8x8)
 -- ============================================================================
-M.GRID_COLS = 6
-M.GRID_ROWS = 6
+M.GRID_COLS = 8
+M.GRID_ROWS = 8
 M.MAX_COLS = 8
 M.MAX_ROWS = 8
-M.CELL_SIZE = 48      -- UI 绘制时每格的像素大小
+M.CELL_SIZE = 40      -- UI 绘制时每格的像素大小(8x8格子稍小些)
 
 -- ============================================================================
 -- 工具: 根据ID查找模板
 -- ============================================================================
 function M.FindArtifactTemplate(id)
     for _, t in ipairs(M.ARTIFACT_TEMPLATES) do
-        if t.id == id then return t end
-    end
-    return nil
-end
-
-function M.FindTabletTemplate(id)
-    for _, t in ipairs(M.TABLET_TEMPLATES) do
         if t.id == id then return t end
     end
     return nil
@@ -668,12 +525,6 @@ function M.RandomArtifactTemplate(maxRarity)
     local pool = M.GetArtifactsByRarity(maxRarity or 5)
     if #pool == 0 then return nil end
     return pool[math.random(1, #pool)]
-end
-
---- 随机选择一个石板模板
-function M.RandomTabletTemplate()
-    if #M.TABLET_TEMPLATES == 0 then return nil end
-    return M.TABLET_TEMPLATES[math.random(1, #M.TABLET_TEMPLATES)]
 end
 
 return M

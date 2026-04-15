@@ -1,6 +1,6 @@
 -- ============================================================================
 -- 背包逻辑模块
--- 格子管理、物品放置/移除/旋转、碰撞检测、石板范围、Combo评估、属性结算
+-- cell-based格子管理、俄罗斯方块放置/旋转、行列完成检测、动态等级、Combo结算
 -- ============================================================================
 
 local Data = require("inventory_data")
@@ -10,7 +10,7 @@ local Inv = {}
 -- ============================================================================
 -- 背包状态
 -- ============================================================================
-Inv.grid = {}            -- grid[r][c] = nil | {type="artifact"|"tablet", itemRef=item}
+Inv.grid = {}            -- grid[r][c] = nil | {itemRef=item}
 Inv.items = {}           -- 所有已放置的物品列表
 Inv.cols = Data.GRID_COLS
 Inv.rows = Data.GRID_ROWS
@@ -21,6 +21,9 @@ Inv.bonusStats = {}
 Inv.activeCombos = {}
 -- 当前标签统计
 Inv.tagCounts = {}
+-- 完成的行/列(用于发光效果)
+Inv.completedRows = {}   -- {[rowIndex] = true}
+Inv.completedCols = {}   -- {[colIndex] = true}
 
 -- ============================================================================
 -- 初始化
@@ -37,19 +40,21 @@ function Inv.Init()
     Inv.bonusStats = {}
     Inv.activeCombos = {}
     Inv.tagCounts = {}
+    Inv.completedRows = {}
+    Inv.completedCols = {}
 end
 
 -- ============================================================================
 -- 物品实例创建
 -- ============================================================================
---- 创建圣物实例
-function Inv.CreateArtifact(templateId, level)
+
+--- 创建圣物实例 (level由行列完成动态计算，不再手动指定)
+function Inv.CreateArtifact(templateId)
     local tmpl = Data.FindArtifactTemplate(templateId)
     if not tmpl then
         print("ERROR: Artifact template not found: " .. tostring(templateId))
         return nil
     end
-    level = level or 1
 
     return {
         type = "artifact",
@@ -57,63 +62,75 @@ function Inv.CreateArtifact(templateId, level)
         template = tmpl,
         name = tmpl.name,
         rarity = tmpl.rarity,
-        level = level,
-        sizeW = tmpl.sizeW,
-        sizeH = tmpl.sizeH,
+        level = 1,           -- 动态计算，基础为1
+        cells = tmpl.cells,
+        boundW = tmpl.boundW,
+        boundH = tmpl.boundH,
         tags = tmpl.tags,
-        rotated = false,  -- 是否旋转90°
-        gridCol = 0,      -- 放置位置(0=未放置)
-        gridRow = 0,
-        placed = false,
-    }
-end
-
---- 创建石板实例
-function Inv.CreateTablet(templateId)
-    local tmpl = Data.FindTabletTemplate(templateId)
-    if not tmpl then
-        print("ERROR: Tablet template not found: " .. tostring(templateId))
-        return nil
-    end
-
-    return {
-        type = "tablet",
-        templateId = templateId,
-        template = tmpl,
-        name = tmpl.name,
-        rarity = tmpl.rarity,
-        sizeW = tmpl.sizeW,
-        sizeH = tmpl.sizeH,
-        maskType = tmpl.maskType,
-        rotated = false,
-        gridCol = 0,
+        rotation = 0,        -- 0/1/2/3 对应 0°/90°/180°/270° 顺时针
+        gridCol = 0,         -- 放置位置(0=未放置)
         gridRow = 0,
         placed = false,
     }
 end
 
 --- 随机创建圣物
-function Inv.CreateRandomArtifact(maxRarity, level)
+function Inv.CreateRandomArtifact(maxRarity)
     local tmpl = Data.RandomArtifactTemplate(maxRarity)
     if not tmpl then return nil end
-    return Inv.CreateArtifact(tmpl.id, level or 1)
-end
-
---- 随机创建石板
-function Inv.CreateRandomTablet()
-    local tmpl = Data.RandomTabletTemplate()
-    if not tmpl then return nil end
-    return Inv.CreateTablet(tmpl.id)
+    return Inv.CreateArtifact(tmpl.id)
 end
 
 -- ============================================================================
--- 尺寸工具(考虑旋转)
+-- 形状工具 (cells + rotation)
 -- ============================================================================
-function Inv.GetItemSize(item)
-    if item.rotated then
-        return item.sizeH, item.sizeW  -- 宽高互换
+
+--- 获取物品在当前旋转下的实际格子偏移列表
+--- 返回 {{dc, dr}, ...} 相对于放置基准点的偏移
+function Inv.GetItemCells(item)
+    local baseCells = item.cells
+    local rot = item.rotation or 0
+    local bw = item.boundW
+    local bh = item.boundH
+
+    if rot == 0 then
+        return baseCells
     end
-    return item.sizeW, item.sizeH
+
+    local result = {}
+    for _, cell in ipairs(baseCells) do
+        local dc, dr = cell[1], cell[2]
+        local nc, nr
+        if rot == 1 then
+            -- 90° CW: (dc,dr) → (bh-1-dr, dc)
+            nc = bh - 1 - dr
+            nr = dc
+        elseif rot == 2 then
+            -- 180°: (dc,dr) → (bw-1-dc, bh-1-dr)
+            nc = bw - 1 - dc
+            nr = bh - 1 - dr
+        else  -- rot == 3
+            -- 270° CW: (dc,dr) → (dr, bw-1-dc)
+            nc = dr
+            nr = bw - 1 - dc
+        end
+        table.insert(result, {nc, nr})
+    end
+    return result
+end
+
+--- 获取物品在当前旋转下的包围盒尺寸
+function Inv.GetItemBounds(item)
+    local rot = item.rotation or 0
+    if rot == 1 or rot == 3 then
+        return item.boundH, item.boundW  -- 宽高互换
+    end
+    return item.boundW, item.boundH
+end
+
+--- 兼容旧API: 返回占用格子数的等效"尺寸"（用于UI绘制pickup区域等）
+function Inv.GetItemSize(item)
+    return Inv.GetItemBounds(item)
 end
 
 -- ============================================================================
@@ -122,20 +139,21 @@ end
 
 --- 检查物品是否可以放在指定位置
 function Inv.CanPlace(item, col, row)
-    local w, h = Inv.GetItemSize(item)
+    local cells = Inv.GetItemCells(item)
 
-    -- 边界检查
-    if col < 1 or row < 1 then return false end
-    if col + w - 1 > Inv.cols then return false end
-    if row + h - 1 > Inv.rows then return false end
+    for _, cell in ipairs(cells) do
+        local c = col + cell[1]
+        local r = row + cell[2]
 
-    -- 检查格子是否被占用(排除自身)
-    for r = row, row + h - 1 do
-        for c = col, col + w - 1 do
-            local cell = Inv.grid[r][c]
-            if cell ~= nil and cell.itemRef ~= item then
-                return false
-            end
+        -- 边界检查
+        if c < 1 or c > Inv.cols or r < 1 or r > Inv.rows then
+            return false
+        end
+
+        -- 格子是否被占用(排除自身)
+        local gridCell = Inv.grid[r][c]
+        if gridCell ~= nil and gridCell.itemRef ~= item then
+            return false
         end
     end
 
@@ -153,17 +171,17 @@ function Inv.PlaceItem(item, col, row)
         Inv.RemoveItem(item)
     end
 
-    local w, h = Inv.GetItemSize(item)
+    local cells = Inv.GetItemCells(item)
     item.gridCol = col
     item.gridRow = row
     item.placed = true
 
     -- 标记格子
-    local cellInfo = {type = item.type, itemRef = item}
-    for r = row, row + h - 1 do
-        for c = col, col + w - 1 do
-            Inv.grid[r][c] = cellInfo
-        end
+    local cellInfo = {itemRef = item}
+    for _, cell in ipairs(cells) do
+        local c = col + cell[1]
+        local r = row + cell[2]
+        Inv.grid[r][c] = cellInfo
     end
 
     -- 加入物品列表(如果还没在)
@@ -188,15 +206,15 @@ end
 function Inv.RemoveItem(item)
     if not item.placed then return end
 
-    local w, h = Inv.GetItemSize(item)
+    local cells = Inv.GetItemCells(item)
 
     -- 清除格子
-    for r = item.gridRow, item.gridRow + h - 1 do
-        for c = item.gridCol, item.gridCol + w - 1 do
-            if r >= 1 and r <= Inv.rows and c >= 1 and c <= Inv.cols then
-                if Inv.grid[r][c] and Inv.grid[r][c].itemRef == item then
-                    Inv.grid[r][c] = nil
-                end
+    for _, cell in ipairs(cells) do
+        local c = item.gridCol + cell[1]
+        local r = item.gridRow + cell[2]
+        if r >= 1 and r <= Inv.rows and c >= 1 and c <= Inv.cols then
+            if Inv.grid[r][c] and Inv.grid[r][c].itemRef == item then
+                Inv.grid[r][c] = nil
             end
         end
     end
@@ -217,20 +235,47 @@ function Inv.RemoveItem(item)
     Inv.RecalculateStats()
 end
 
---- 旋转物品90°
+--- 旋转物品 (4方向: 0→1→2→3→0)
 function Inv.RotateItem(item)
-    if item.sizeW == item.sizeH then return end  -- 正方形不需要旋转
+    -- 单格不需要旋转
+    if #item.cells <= 1 then return false end
+    -- 正方形且旋转对称的不需要旋转(如O形)
+    if item.boundW == item.boundH then
+        -- 检查是否旋转后形状相同(O形方块)
+        local oldRot = item.rotation
+        item.rotation = (item.rotation + 1) % 4
+        local newCells = Inv.GetItemCells(item)
+        item.rotation = oldRot
+        local oldCells = Inv.GetItemCells(item)
+        -- 简单比较: 排序后比较
+        local function cellKey(c) return c[1] * 100 + c[2] end
+        local oldKeys, newKeys = {}, {}
+        for _, c in ipairs(oldCells) do table.insert(oldKeys, cellKey(c)) end
+        for _, c in ipairs(newCells) do table.insert(newKeys, cellKey(c)) end
+        table.sort(oldKeys)
+        table.sort(newKeys)
+        local same = true
+        if #oldKeys == #newKeys then
+            for i = 1, #oldKeys do
+                if oldKeys[i] ~= newKeys[i] then same = false; break end
+            end
+        else
+            same = false
+        end
+        if same then return false end
+    end
 
     if item.placed then
         -- 先移除, 尝试旋转后放回
         local oldCol, oldRow = item.gridCol, item.gridRow
+        local oldRot = item.rotation
         Inv.RemoveItem(item)
-        item.rotated = not item.rotated
+        item.rotation = (oldRot + 1) % 4
 
         -- 尝试在原位放置(旋转后)
         if not Inv.CanPlace(item, oldCol, oldRow) then
             -- 旋转后放不下, 恢复
-            item.rotated = not item.rotated
+            item.rotation = oldRot
             Inv.PlaceItem(item, oldCol, oldRow)
             return false
         end
@@ -239,7 +284,7 @@ function Inv.RotateItem(item)
         return true
     else
         -- 未放置的直接旋转
-        item.rotated = not item.rotated
+        item.rotation = (item.rotation + 1) % 4
         return true
     end
 end
@@ -251,22 +296,12 @@ function Inv.DiscardItem(item)
     end
 end
 
---- 自动放置物品(找到第一个可用位置)
+--- 自动放置物品(找到第一个可用位置, 尝试4个旋转方向)
 function Inv.AutoPlace(item)
-    local w, h = Inv.GetItemSize(item)
+    local origRot = item.rotation
 
-    -- 尝试正常方向
-    for r = 1, Inv.rows do
-        for c = 1, Inv.cols do
-            if Inv.CanPlace(item, c, r) then
-                return Inv.PlaceItem(item, c, r)
-            end
-        end
-    end
-
-    -- 尝试旋转后
-    if w ~= h then
-        item.rotated = not item.rotated
+    for rot = 0, 3 do
+        item.rotation = (origRot + rot) % 4
         for r = 1, Inv.rows do
             for c = 1, Inv.cols do
                 if Inv.CanPlace(item, c, r) then
@@ -274,9 +309,10 @@ function Inv.AutoPlace(item)
                 end
             end
         end
-        item.rotated = not item.rotated  -- 恢复
     end
 
+    -- 恢复原始旋转
+    item.rotation = origRot
     return false  -- 没有空间
 end
 
@@ -293,64 +329,64 @@ function Inv.GetItemAt(col, row)
 end
 
 -- ============================================================================
--- 石板范围计算
+-- 行列完成检测 & 动态等级
 -- ============================================================================
 
---- 获取石板影响的格子坐标列表
-function Inv.GetTabletAffectedCells(tablet)
-    if tablet.type ~= "tablet" or not tablet.placed then return {} end
+--- 更新完成的行和列
+function Inv.UpdateCompletedLines()
+    Inv.completedRows = {}
+    Inv.completedCols = {}
 
-    local mask = Data.TABLET_MASKS[tablet.maskType]
-    if not mask then return {} end
-
-    local cells = {}
-    -- 石板中心点(1x1石板直接用其位置)
-    local cx = tablet.gridCol
-    local cy = tablet.gridRow
-
-    for _, offset in ipairs(mask.offsets) do
-        local tc = cx + offset[1]
-        local tr = cy + offset[2]
-        if tc >= 1 and tc <= Inv.cols and tr >= 1 and tr <= Inv.rows then
-            table.insert(cells, {col = tc, row = tr})
-        end
-    end
-
-    return cells
-end
-
---- 获取石板影响的圣物列表(去重)
-function Inv.GetTabletAffectedArtifacts(tablet)
-    local cells = Inv.GetTabletAffectedCells(tablet)
-    local affected = {}
-    local seen = {}
-
-    for _, cell in ipairs(cells) do
-        local item = Inv.GetItemAt(cell.col, cell.row)
-        if item and item.type == "artifact" and not seen[item] then
-            seen[item] = true
-            table.insert(affected, item)
-        end
-    end
-
-    return affected
-end
-
---- 获取一个圣物受到多少个石板影响
-function Inv.GetTabletCountForArtifact(artifact)
-    local count = 0
-    for _, item in ipairs(Inv.items) do
-        if item.type == "tablet" and item.placed then
-            local affected = Inv.GetTabletAffectedArtifacts(item)
-            for _, a in ipairs(affected) do
-                if a == artifact then
-                    count = count + 1
-                    break
-                end
+    -- 检查每一行
+    for r = 1, Inv.rows do
+        local full = true
+        for c = 1, Inv.cols do
+            if Inv.grid[r][c] == nil then
+                full = false
+                break
             end
         end
+        if full then
+            Inv.completedRows[r] = true
+        end
     end
-    return count
+
+    -- 检查每一列
+    for c = 1, Inv.cols do
+        local full = true
+        for r = 1, Inv.rows do
+            if Inv.grid[r][c] == nil then
+                full = false
+                break
+            end
+        end
+        if full then
+            Inv.completedCols[c] = true
+        end
+    end
+end
+
+--- 计算某个圣物的动态等级
+--- 等级 = 1 + 该圣物在已完成行中占据的格子数 + 该圣物在已完成列中占据的格子数
+function Inv.CalculateArtifactLevel(item)
+    if not item.placed then return 1 end
+
+    local cells = Inv.GetItemCells(item)
+    local bonus = 0
+
+    for _, cell in ipairs(cells) do
+        local c = item.gridCol + cell[1]
+        local r = item.gridRow + cell[2]
+
+        if Inv.completedRows[r] then
+            bonus = bonus + 1
+        end
+        if Inv.completedCols[c] then
+            bonus = bonus + 1
+        end
+    end
+
+    return 1 + bonus
 end
 
 -- ============================================================================
@@ -359,10 +395,18 @@ end
 function Inv.RecalculateStats()
     local stats = {}
 
+    -- 0. 更新行列完成状态 & 动态等级
+    Inv.UpdateCompletedLines()
+    for _, item in ipairs(Inv.items) do
+        if item.placed then
+            item.level = Inv.CalculateArtifactLevel(item)
+        end
+    end
+
     -- 1. 统计标签
     Inv.tagCounts = {}
     for _, item in ipairs(Inv.items) do
-        if item.type == "artifact" and item.placed then
+        if item.placed then
             for _, tag in ipairs(item.tags) do
                 Inv.tagCounts[tag] = (Inv.tagCounts[tag] or 0) + 1
             end
@@ -371,13 +415,13 @@ function Inv.RecalculateStats()
 
     -- 2. 累加圣物基础属性 + 等级成长
     for _, item in ipairs(Inv.items) do
-        if item.type == "artifact" and item.placed then
+        if item.placed then
             local tmpl = item.template
             -- 基础值
             for k, v in pairs(tmpl.baseStats) do
                 stats[k] = (stats[k] or 0) + v
             end
-            -- 等级成长: BaseValue * GrowthRate * (Level - 1)
+            -- 等级成长: growthStats * (Level - 1)
             if item.level > 1 and tmpl.growthStats then
                 for k, v in pairs(tmpl.growthStats) do
                     stats[k] = (stats[k] or 0) + v * (item.level - 1)
@@ -386,35 +430,7 @@ function Inv.RecalculateStats()
         end
     end
 
-    -- 3. 应用石板加成
-    for _, tablet in ipairs(Inv.items) do
-        if tablet.type == "tablet" and tablet.placed then
-            local tmpl = tablet.template
-            local affected = Inv.GetTabletAffectedArtifacts(tablet)
-
-            for _, artifact in ipairs(affected) do
-                -- 检查石板叠加数量(同一圣物最多3个石板增强,超过衰减)
-                local tabletCount = Inv.GetTabletCountForArtifact(artifact)
-                local multiplier = 1.0
-                if tabletCount > 3 then
-                    multiplier = 0.35  -- 第4个及以后只生效35%
-                end
-
-                if tmpl.bonusStats then
-                    for k, v in pairs(tmpl.bonusStats) do
-                        stats[k] = (stats[k] or 0) + v * multiplier
-                    end
-                end
-                if tmpl.penaltyStats then
-                    for k, v in pairs(tmpl.penaltyStats) do
-                        stats[k] = (stats[k] or 0) + v * multiplier
-                    end
-                end
-            end
-        end
-    end
-
-    -- 4. 评估Combo
+    -- 3. 评估Combo
     Inv.activeCombos = {}
     for _, combo in ipairs(Data.COMBO_TEMPLATES) do
         local count = Inv.tagCounts[combo.tag] or 0
@@ -434,7 +450,7 @@ function Inv.RecalculateStats()
         end
     end
 
-    -- 5. 应用Combo加成(百分比加成存入独立字段)
+    -- 4. 应用Combo加成(百分比加成存入独立字段)
     for _, ac in ipairs(Inv.activeCombos) do
         local eff = ac.effect
         for k, v in pairs(eff) do

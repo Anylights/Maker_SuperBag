@@ -304,6 +304,10 @@ function Start()
         nvgCreateImage(vg, "image/tiles32/edge_6.png", 0),
         nvgCreateImage(vg, "image/tiles32/edge_7.png", 0),
     }
+    imgCrateTiles = {
+        nvgCreateImage(vg, "image/tiles32/crate_0.png", 0),
+        nvgCreateImage(vg, "image/tiles32/crate_1.png", 0),
+    }
 
     print("Player image: " .. tostring(imgPlayer))
     for k, v in pairs(imgEnemies) do
@@ -330,7 +334,7 @@ function Start()
     -- 初始化背包系统
     Inv.Init()
     -- 给玩家初始圣物(教学引导)
-    local starterArtifact = Inv.CreateArtifact("a_bullet_core", 1)
+    local starterArtifact = Inv.CreateArtifact("a_bullet_core")
     if starterArtifact then
         -- 初始物品直接放到玩家脚下, 需要按F拾取
         table.insert(lootItems, {
@@ -346,7 +350,7 @@ function Start()
         table.insert(lootItems, {
             x = player.x + math.random(-16, 16),
             y = player.y + math.random(-16, 16),
-            type = item.type,  -- "artifact" 或 "tablet"
+            type = "artifact",
             itemData = item,
         })
     end
@@ -867,11 +871,11 @@ end
 -- 拾取辅助函数
 -- ============================================================================
 
---- 获取玩家附近的圣物/石板掉落物列表
+--- 获取玩家附近的圣物掉落物列表
 function GetNearbyArtifactLoot(radius)
     local result = {}
     for _, item in ipairs(lootItems) do
-        if item.type == "artifact" or item.type == "tablet" then
+        if item.type == "artifact" then
             local dx = player.x - item.x
             local dy = player.y - item.y
             if dx * dx + dy * dy <= radius * radius then
@@ -1182,10 +1186,10 @@ function HandleUpdate(eventType, eventData)
         UpdateDamageNumbers(dt)
         UpdateCamera()
 
-        -- 拾取掉落物(弹药/血包自动拾取, 圣物/石板需按F)
+        -- 拾取掉落物(弹药/血包自动拾取, 圣物需按F)
         for i = #lootItems, 1, -1 do
             local item = lootItems[i]
-            if item.type == "artifact" or item.type == "tablet" then
+            if item.type == "artifact" then
                 -- 跳过, 由F键处理
             elseif CircleCollision(player.x, player.y, player.radius + 10, item.x, item.y, 8) then
                 if item.type == "ammo" then
@@ -1659,7 +1663,7 @@ function UpdateBullets(dt)
                         if he == e then alreadyHit = true; break end
                     end
                 end
-                if not alreadyHit and CircleCollision(b.x, b.y, b.radius, e.x, e.y, e.radius) then
+                if not alreadyHit and not e.dead and CircleCollision(b.x, b.y, b.radius, e.x, e.y, e.radius) then
                     -- 护甲减伤
                     local actualDmg = b.damage
                     if e.armor and e.armor > 0 then
@@ -1789,8 +1793,9 @@ function UpdateBullets(dt)
                                             size = 2 + math.random() * 2, glow = true,
                                         })
                                     end
-                                    -- 感电击杀判定
-                                    if et.hp <= 0 then
+                                    -- 感电击杀判定(标记死亡, 不在此处remove避免破坏外层j索引)
+                                    if et.hp <= 0 and not et.dead then
+                                        et.dead = true
                                         killCount = killCount + 1
                                         WM.OnEnemyKilled()
                                         score = score + 50
@@ -1805,7 +1810,6 @@ function UpdateBullets(dt)
                                                 size = 2 + math.random() * 2, glow = true,
                                             })
                                         end
-                                        table.remove(enemies, kk)
                                     end
                                 end
                             end
@@ -1868,7 +1872,8 @@ function UpdateBullets(dt)
                     TriggerHitstop(HITSTOP_HIT)
                     PlaySfx(sndHit, 0.3)
 
-                    if e.hp <= 0 then
+                    if e.hp <= 0 and not e.dead then
+                        e.dead = true
                         -- 敌人死亡 — 更强震动 + 更长停顿 + 音效
                         TriggerShake(6, 0.15)
                         TriggerHitstop(HITSTOP_KILL)
@@ -1891,7 +1896,7 @@ function UpdateBullets(dt)
                             })
                         end
 
-                        -- 掉落圣物/石板(背包系统)
+                        -- 掉落圣物(背包系统)
                         local invLootRoll = math.random(1, 100)
                         local dropRarityMax = 3  -- 默认最高掉蓝色
                         if e.typeKey == "rusher" then dropRarityMax = 4 end  -- 冲锋者可掉紫
@@ -1900,33 +1905,17 @@ function UpdateBullets(dt)
 
                         -- 掉落率受背包加成影响
                         local lootBonusPct = Inv.GetStat("lootBonus", 0)
-                        local artifactChance = 25 + lootBonusPct * 0.5   -- 基础25%
-                        local tabletChance = artifactChance + 12         -- 额外12%掉石板
+                        local artifactChance = 30 + lootBonusPct * 0.5   -- 基础30%
 
                         if invLootRoll <= artifactChance then
                             -- 掉落圣物(掉到地面, 需要玩家走过去拾取)
-                            local level = 1
-                            if killCount > 5 then level = math.random(1, 2) end
-                            if killCount > 15 then level = math.random(1, 3) end
-                            if killCount > 30 then level = math.random(2, 4) end
-                            local artifact = Inv.CreateRandomArtifact(dropRarityMax, level)
+                            local artifact = Inv.CreateRandomArtifact(dropRarityMax)
                             if artifact then
                                 table.insert(lootItems, {
                                     x = e.x + math.random(-8, 8),
                                     y = e.y + math.random(-8, 8),
                                     type = "artifact",
                                     itemData = artifact,
-                                })
-                            end
-                        elseif invLootRoll <= tabletChance then
-                            -- 掉落石板(掉到地面)
-                            local tablet = Inv.CreateRandomTablet()
-                            if tablet then
-                                table.insert(lootItems, {
-                                    x = e.x + math.random(-8, 8),
-                                    y = e.y + math.random(-8, 8),
-                                    type = "tablet",
-                                    itemData = tablet,
                                 })
                             end
                         end
@@ -1967,7 +1956,6 @@ function UpdateBullets(dt)
                                 glow = true,
                             })
                         end
-                        table.remove(enemies, j)
                     end
                     break
                 end
@@ -2039,6 +2027,13 @@ function UpdateBullets(dt)
 
         if remove then
             table.remove(bullets, i)
+        end
+    end
+
+    -- 统一清理已标记 dead 的敌人（延迟删除，避免遍历中索引错乱）
+    for i = #enemies, 1, -1 do
+        if enemies[i].dead then
+            table.remove(enemies, i)
         end
     end
 end
@@ -2337,19 +2332,21 @@ function UpdateDamageNumbers(dt)
 end
 
 function UpdateSearch(dt)
-    -- 检测玩家是否在箱子附近且按E
+    -- 玩家站在物资箱上自动搜刮(无需按键)
+    local pc = math.floor(player.x / TILE_SIZE) + 1
+    local pr = math.floor(player.y / TILE_SIZE) + 1
+
     if searchingCrate then
         searchingCrate.timer = searchingCrate.timer - dt
-        -- 检查是否还在范围内
-        local cx = (searchingCrate.col - 0.5) * TILE_SIZE
-        local cy = (searchingCrate.row - 0.5) * TILE_SIZE
-        local dist = math.sqrt((player.x - cx)^2 + (player.y - cy)^2)
-        if dist > TILE_SIZE * 1.5 or not input:GetKeyDown(KEY_E) then
+        -- 检查是否还站在同一个箱子上
+        if pc ~= searchingCrate.col or pr ~= searchingCrate.row then
             searchingCrate = nil
             return
         end
         if searchingCrate.timer <= 0 then
             -- 搜刮完成
+            local cx = (searchingCrate.col - 0.5) * TILE_SIZE
+            local cy = (searchingCrate.row - 0.5) * TILE_SIZE
             mapData[searchingCrate.row][searchingCrate.col] = TILE_FLOOR
             -- 随机掉落
             local roll = math.random(1, 100)
@@ -2362,32 +2359,19 @@ function UpdateSearch(dt)
             searchingCrate = nil
         end
     else
-        -- 检测是否按E开始搜刮
-        if input:GetKeyDown(KEY_E) and player.alive then
-            local pc = math.floor(player.x / TILE_SIZE) + 1
-            local pr = math.floor(player.y / TILE_SIZE) + 1
-            -- 检查周围格子
-            for dr = -1, 1 do
-                for dc = -1, 1 do
-                    local rr = pr + dr
-                    local cc = pc + dc
-                    if rr >= 1 and rr <= MAP_ROWS and cc >= 1 and cc <= MAP_COLS then
-                        if mapData[rr][cc] == TILE_CRATE then
-                            searchingCrate = {col = cc, row = rr, timer = SEARCH_TIME}
-                            break
-                        end
-                    end
-                end
-                if searchingCrate then break end
+        -- 检测玩家是否站在箱子格子上
+        if player.alive and pc >= 1 and pc <= MAP_COLS and pr >= 1 and pr <= MAP_ROWS then
+            if mapData[pr][pc] == TILE_CRATE then
+                searchingCrate = {col = pc, row = pr, timer = SEARCH_TIME}
             end
         end
     end
 
-    -- 拾取掉落物(弹药/血包自动拾取, 圣物/石板需按F)
+    -- 拾取掉落物(弹药/血包自动拾取, 圣物需按F)
     for i = #lootItems, 1, -1 do
         local item = lootItems[i]
-        -- 圣物/石板不自动拾取, 需要按F键
-        if item.type == "artifact" or item.type == "tablet" then
+        -- 圣物不自动拾取, 需要按F键
+        if item.type == "artifact" then
             -- 跳过, 由F键处理
         elseif CircleCollision(player.x, player.y, player.radius + 10, item.x, item.y, 8) then
             if item.type == "ammo" then
@@ -2456,7 +2440,7 @@ function RestartGame()
     InvUI.Close()
     gameTimeScale = 1.0
     -- 给初始圣物
-    local starterArtifact = Inv.CreateArtifact("a_bullet_core", 1)
+    local starterArtifact = Inv.CreateArtifact("a_bullet_core")
     if starterArtifact then
         table.insert(lootItems, {
             x = player.x + math.random(-12, 12),
@@ -2847,21 +2831,11 @@ function DrawMap(viewW, viewH)
                 local hash = ((r * 7 + c * 13) % 4) + 1
                 DrawTileImage(imgFloorTiles[hash], x, y)
             elseif tile == TILE_CRATE then
-                -- 箱子: 先画地板底色, 再画箱子图标
+                -- 箱子: 先画地板底色, 再画箱子瓦片
                 local hash = ((r * 7 + c * 13) % 4) + 1
                 DrawTileImage(imgFloorTiles[hash], x, y)
-                -- 箱子图标
-                nvgBeginPath(vg)
-                local cx = x + TILE_SIZE * 0.15
-                local cy = y + TILE_SIZE * 0.15
-                local cw = TILE_SIZE * 0.7
-                local ch = TILE_SIZE * 0.7
-                nvgRoundedRect(vg, cx, cy, cw, ch, 3)
-                nvgFillColor(vg, nvgRGBA(160, 120, 60, 255))
-                nvgFill(vg)
-                nvgStrokeColor(vg, nvgRGBA(120, 90, 40, 255))
-                nvgStrokeWidth(vg, 1.5)
-                nvgStroke(vg)
+                local crateHash = ((r * 3 + c * 11) % #imgCrateTiles) + 1
+                DrawTileImage(imgCrateTiles[crateHash], x, y)
             elseif tile == TILE_EXIT then
                 -- 撤离点: 先画地板, 再叠加闪烁绿色半透明层
                 local hash = ((r * 7 + c * 13) % 4) + 1
@@ -3262,8 +3236,8 @@ function DrawLootItems()
     for _, item in ipairs(lootItems) do
         local bounce = math.sin(t * 4 + item.x) * 2
 
-        if item.type == "artifact" or item.type == "tablet" then
-            -- 圣物/石板: 稀有度颜色发光宝珠 + 名称标签
+        if item.type == "artifact" then
+            -- 圣物: 稀有度颜色发光宝珠 + 名称标签
             local rarity = item.itemData.rarity or 1
             local col = InvData.RARITY_COLORS[rarity] or {200, 200, 200}
             local pulse = 0.7 + 0.3 * math.sin(t * 5 + item.y)  -- 脉冲发光
@@ -3309,7 +3283,7 @@ function DrawLootItems()
                 local popY = item.y + bounce - 22
                 local rarityName = InvData.RARITY_NAMES[rarity] or "普通"
                 local desc = tmpl and tmpl.desc or ""
-                local itemType = item.type == "tablet" and "石板" or "圣物"
+                local itemType = "圣物"
 
                 -- 弹窗尺寸
                 local popW = 120
@@ -3537,12 +3511,13 @@ function DrawSearchProgress()
     nvgFillColor(vg, nvgRGBA(255, 200, 60, 255))
     nvgFill(vg)
 
-    -- 文字
-    nvgFontFace(vg, "sans")
-    nvgFontSize(vg, 10)
-    nvgTextAlign(vg, NVG_ALIGN_CENTER + NVG_ALIGN_MIDDLE)
-    nvgFillColor(vg, nvgRGBA(255, 255, 255, 220))
-    nvgText(vg, cx, cy - 28, "搜索中...", nil)
+    -- 环形进度(箱子中心)
+    local radius = TILE_SIZE * 0.35
+    nvgBeginPath(vg)
+    nvgArc(vg, cx, cy, radius, -math.pi * 0.5, -math.pi * 0.5 + math.pi * 2 * progress, NVG_CW)
+    nvgStrokeColor(vg, nvgRGBA(255, 220, 60, 200))
+    nvgStrokeWidth(vg, 2.5)
+    nvgStroke(vg)
 end
 
 -- ============================================================================

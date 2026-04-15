@@ -520,9 +520,56 @@ function M.GetArtifactsByRarity(maxRarity)
     return result
 end
 
---- 随机选择一个圣物模板
+--- 稀有度掉落权重 (数值越大越容易出)
+M.RARITY_DROP_WEIGHTS = {
+    [1] = 55,   -- 白色: 大量
+    [2] = 30,   -- 绿色: 适量
+    [3] = 12,   -- 蓝色: 稀少
+    [4] = 2.5,  -- 紫色: 极稀有
+    [5] = 0.5,  -- 金色: 传说级
+}
+
+--- 随机选择一个圣物模板(加权稀有度)
 function M.RandomArtifactTemplate(maxRarity)
-    local pool = M.GetArtifactsByRarity(maxRarity or 5)
+    maxRarity = maxRarity or 5
+    -- 第一步: 按稀有度权重选出目标稀有度
+    local weightSum = 0
+    local tiers = {}
+    for r = 1, maxRarity do
+        local w = M.RARITY_DROP_WEIGHTS[r] or 0
+        if w > 0 then
+            -- 确认该稀有度有可用模板
+            local hasAny = false
+            for _, t in ipairs(M.ARTIFACT_TEMPLATES) do
+                if t.rarity == r then hasAny = true; break end
+            end
+            if hasAny then
+                table.insert(tiers, { rarity = r, weight = w })
+                weightSum = weightSum + w
+            end
+        end
+    end
+    if weightSum <= 0 then return nil end
+
+    -- 加权随机选稀有度
+    local roll = math.random() * weightSum
+    local targetRarity = 1
+    local acc = 0
+    for _, tier in ipairs(tiers) do
+        acc = acc + tier.weight
+        if roll <= acc then
+            targetRarity = tier.rarity
+            break
+        end
+    end
+
+    -- 第二步: 在该稀有度中均匀随机选模板
+    local pool = {}
+    for _, t in ipairs(M.ARTIFACT_TEMPLATES) do
+        if t.rarity == targetRarity then
+            table.insert(pool, t)
+        end
+    end
     if #pool == 0 then return nil end
     return pool[math.random(1, #pool)]
 end

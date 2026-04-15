@@ -141,8 +141,8 @@ WM.REWARD_POOL = {
       icon = "shield", apply = function(p) p.maxHp = p.maxHp + 15; p.hp = p.hp + 15 end },
     { id = "dmg_up",      name = "利爪强化",   desc = "伤害 +8",
       icon = "damage", apply = function(p) end },  -- 通过weapon modifier实现
-    { id = "speed_up",    name = "疾风步法",   desc = "移速 +20",
-      icon = "speed", apply = function(p) p.speed = p.speed + 20 end },
+    { id = "speed_up",    name = "疾风步法",   desc = "移速 +8",
+      icon = "speed", apply = function(p) p.speed = p.speed + 8 end },
     { id = "mag_up",      name = "大容量弹袋",   desc = "弹匣 +4",
       icon = "mag", apply = function(p) end },  -- 通过weapon modifier实现
     { id = "fire_rate",   name = "连射技巧",   desc = "射速提升",

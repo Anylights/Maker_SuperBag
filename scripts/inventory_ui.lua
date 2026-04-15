@@ -684,13 +684,14 @@ function UI.DrawItemCells(nvg, item, baseCol, baseRow, alpha)
         nvgFillColor(nvg, nvgRGBA(rarityCol[1], rarityCol[2], rarityCol[3], math.floor(240 * alpha)))
         nvgText(nvg, centerX, centerY, displayName, nil)
 
-        if item.level and item.level > 1 then
+        if item.level then
             local topRightX = gridOriginX + maxC * cellSize - inset - 1
             local topRightY = gridOriginY + (minR - 1) * cellSize + inset + 1
-            nvgFontSize(nvg, 7)
+            local lvCol = Data.LEVEL_COLORS[math.min(item.level, 8)] or {180, 180, 180}
+            nvgFontSize(nvg, 9)
             nvgTextAlign(nvg, NVG_ALIGN_RIGHT + NVG_ALIGN_TOP)
-            nvgFillColor(nvg, nvgRGBA(255, 220, 80, math.floor(230 * alpha)))
-            nvgText(nvg, topRightX, topRightY, tostring(item.level), nil)
+            nvgFillColor(nvg, nvgRGBA(lvCol[1], lvCol[2], lvCol[3], math.floor(255 * alpha)))
+            nvgText(nvg, topRightX, topRightY, "LV." .. item.level, nil)
             nvgTextAlign(nvg, NVG_ALIGN_CENTER + NVG_ALIGN_MIDDLE)
         end
     else
@@ -699,16 +700,17 @@ function UI.DrawItemCells(nvg, item, baseCol, baseRow, alpha)
         local maxBytes = maxChars * 3
         if #displayName > maxBytes then displayName = string.sub(displayName, 1, maxBytes) end
 
-        local hasLevel = item.level and item.level > 1
+        local hasLevel = item.level ~= nil
         local nameY = hasLevel and (centerY - 5) or centerY
         nvgFontSize(nvg, 9)
         nvgFillColor(nvg, nvgRGBA(rarityCol[1], rarityCol[2], rarityCol[3], math.floor(255 * alpha)))
         nvgText(nvg, centerX, nameY, displayName, nil)
 
         if hasLevel then
-            nvgFontSize(nvg, 8)
-            nvgFillColor(nvg, nvgRGBA(255, 220, 80, math.floor(230 * alpha)))
-            nvgText(nvg, centerX, centerY + 6, "Lv" .. item.level, nil)
+            local lvCol = Data.LEVEL_COLORS[math.min(item.level, 8)] or {180, 180, 180}
+            nvgFontSize(nvg, 10)
+            nvgFillColor(nvg, nvgRGBA(lvCol[1], lvCol[2], lvCol[3], math.floor(255 * alpha)))
+            nvgText(nvg, centerX, centerY + 6, "LV." .. item.level, nil)
         end
     end
 
@@ -898,14 +900,16 @@ function UI.DrawItemTooltip(nvg, item, mx, my, logicalW, logicalH, alpha)
 
     -- 等级
     if item.level then
-        nvgFillColor(nvg, nvgRGBA(255, 220, 80, math.floor(220 * alpha)))
-        nvgText(nvg, tipX + 10, yOff, "Lv." .. item.level, nil)
+        local lvCol = Data.LEVEL_COLORS[math.min(item.level, 8)] or {180, 180, 180}
+        nvgFontSize(nvg, 12)
+        nvgFillColor(nvg, nvgRGBA(lvCol[1], lvCol[2], lvCol[3], math.floor(255 * alpha)))
+        nvgText(nvg, tipX + 10, yOff, "LV." .. item.level, nil)
 
         -- 等级说明
         if item.level > 1 then
             nvgFillColor(nvg, nvgRGBA(200, 180, 80, math.floor(160 * alpha)))
             nvgFontSize(nvg, 9)
-            nvgText(nvg, tipX + 50, yOff + 1, "(行列完成加成)", nil)
+            nvgText(nvg, tipX + 55, yOff + 1, "(行列完成加成)", nil)
             nvgFontSize(nvg, 10)
         end
         yOff = yOff + 16

@@ -26,6 +26,17 @@ M.RARITY_COLORS = {
     [3] = {80, 140, 255},   -- 蓝
     [4] = {180, 80, 255},   -- 紫
     [5] = {255, 200, 40},   -- 金
+
+--- 等级颜色(LV.1~LV.8+)
+M.LEVEL_COLORS = {
+    [1] = {180, 180, 180},  -- 灰白
+    [2] = {120, 220, 120},  -- 浅绿
+    [3] = {80, 180, 255},   -- 天蓝
+    [4] = {160, 120, 255},  -- 紫蓝
+    [5] = {255, 160, 40},   -- 橙色
+    [6] = {255, 80, 80},    -- 红色
+    [7] = {255, 50, 200},   -- 品红
+    [8] = {255, 220, 60},   -- 金色
 }
 
 M.RARITY_BG_COLORS = {
@@ -111,9 +122,9 @@ M.ARTIFACT_TEMPLATES = {
         rarity = 1,
         cells = {{0,0}}, boundW = 1, boundH = 1,
         tags = {"Mobility"},
-        baseStats = {moveSpeed = 35},
-        growthStats = {moveSpeed = 12},
-        desc = "移速+35",
+        baseStats = {moveSpeed = 12},
+        growthStats = {moveSpeed = 4},
+        desc = "移速+12",
         icon = "boots",
     },
     {
@@ -201,9 +212,9 @@ M.ARTIFACT_TEMPLATES = {
         rarity = 2,
         cells = {{0,0},{1,0}}, boundW = 2, boundH = 1,
         tags = {"Survival"},
-        baseStats = {hpRegen = 4, maxHp = 20},
-        growthStats = {hpRegen = 2, maxHp = 10},
-        desc = "每秒回复4HP,最大生命+20",
+        baseStats = {hpRegen = 1, maxHp = 10},
+        growthStats = {hpRegen = 0.5, maxHp = 5},
+        desc = "每秒回复1HP,最大生命+10",
         icon = "medkit",
     },
     {
@@ -313,9 +324,9 @@ M.ARTIFACT_TEMPLATES = {
         rarity = 3,
         cells = {{1,0},{0,1},{1,1}}, boundW = 2, boundH = 2,  -- 反L形
         tags = {"Mobility", "Mobility"},
-        baseStats = {dashCooldown = -1.0, moveSpeed = 18},
-        growthStats = {moveSpeed = 6},
-        desc = "冲刺CD-1秒,移速+18",
+        baseStats = {dashCooldown = -1.0, moveSpeed = 8},
+        growthStats = {moveSpeed = 3},
+        desc = "冲刺CD-1秒,移速+8",
         icon = "dash",
     },
 
@@ -464,8 +475,8 @@ M.COMBO_TEMPLATES = {
         tag = "Mobility",
         thresholds = {2, 4},
         effects = {
-            {desc = "移速+15%", moveSpeedPercent = 15},
-            {desc = "移速+25%, 冲刺后2秒+20%伤害", moveSpeedPercent = 25, dashDamageBonus = 20},
+            {desc = "移速+8%", moveSpeedPercent = 8},
+            {desc = "移速+15%, 冲刺后2秒+15%伤害", moveSpeedPercent = 15, dashDamageBonus = 15},
         },
     },
     {

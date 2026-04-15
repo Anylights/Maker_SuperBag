@@ -3574,9 +3574,9 @@ function DrawDamageNumbers()
     for _, d in ipairs(damageNumbers) do
         local alpha = math.floor((d.life / d.maxLife) * 255)
         if d.isCrit then
-            -- 暴击: 金色大字
+            -- 暴击: 红色大字
             nvgFontSize(vg, 18)
-            nvgFillColor(vg, nvgRGBA(255, 210, 50, alpha))
+            nvgFillColor(vg, nvgRGBA(255, 40, 40, alpha))
         elseif d.isBurn then
             -- 燃烧DoT: 橙色小字
             nvgFontSize(vg, 10)

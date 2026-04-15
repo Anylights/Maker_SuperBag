@@ -70,15 +70,18 @@ local CRATE_CONFIG = {
     },
 }
 
--- 箱子生成权重(按波次递进)
+-- 箱子生成权重(按波次严格递进, 前期只有木箱)
 local function GetCrateSpawnWeights(wave)
-    -- 后期波次提升高阶箱子概率
     if wave >= 7 then
-        return { {TILE_CRATE_WOOD, 40}, {TILE_CRATE_IRON, 40}, {TILE_CRATE_GOLD, 20} }
-    elseif wave >= 4 then
-        return { {TILE_CRATE_WOOD, 50}, {TILE_CRATE_IRON, 35}, {TILE_CRATE_GOLD, 15} }
+        return { {TILE_CRATE_WOOD, 30}, {TILE_CRATE_IRON, 40}, {TILE_CRATE_GOLD, 30} }
+    elseif wave >= 5 then
+        return { {TILE_CRATE_WOOD, 45}, {TILE_CRATE_IRON, 40}, {TILE_CRATE_GOLD, 15} }
+    elseif wave >= 3 then
+        -- 3-4关: 木+铁, 无金
+        return { {TILE_CRATE_WOOD, 70}, {TILE_CRATE_IRON, 30}, {TILE_CRATE_GOLD, 0} }
     else
-        return { {TILE_CRATE_WOOD, 60}, {TILE_CRATE_IRON, 30}, {TILE_CRATE_GOLD, 10} }
+        -- 1-2关: 纯木箱
+        return { {TILE_CRATE_WOOD, 100}, {TILE_CRATE_IRON, 0}, {TILE_CRATE_GOLD, 0} }
     end
 end
 
@@ -118,11 +121,11 @@ local WEAPON = {
 -- 子弹拖尾最大记录长度
 local TRAIL_MAX = 6
 
--- 敌人类型数据
+-- 敌人类型数据(血量按幂次曲线平衡, 基础值已翻倍+)
 local ENEMY_TYPES = {
     patrol = {
         name = "灰狼巡逻",
-        hp = 50, speed = 60, damage = 10, radius = 12,
+        hp = 100, speed = 60, damage = 10, radius = 12,
         color = {200, 80, 80},
         sightRange = 200, attackRange = 180, attackRate = 0.8,
         bulletSpeed = 350,
@@ -130,7 +133,7 @@ local ENEMY_TYPES = {
     },
     sentry = {
         name = "灰狼哨兵",
-        hp = 40, speed = 0, damage = 12, radius = 14,
+        hp = 85, speed = 0, damage = 12, radius = 14,
         color = {80, 80, 200},
         sightRange = 280, attackRange = 260, attackRate = 1.8,
         bulletSpeed = 400,
@@ -140,7 +143,7 @@ local ENEMY_TYPES = {
     },
     rusher = {
         name = "灰狼突击",
-        hp = 60, speed = 140, damage = 20, radius = 10,
+        hp = 130, speed = 140, damage = 20, radius = 10,
         color = {200, 160, 40},
         sightRange = 160, attackRange = 30, attackRate = 0.5,
         bulletSpeed = 0,  -- 近战
@@ -148,7 +151,7 @@ local ENEMY_TYPES = {
     },
     heavy = {
         name = "灰狼重装",
-        hp = 120, speed = 35, damage = 8, radius = 16,
+        hp = 260, speed = 35, damage = 8, radius = 16,
         color = {100, 100, 120},
         sightRange = 220, attackRange = 160, attackRate = 2.2,
         bulletSpeed = 280,
@@ -156,6 +159,17 @@ local ENEMY_TYPES = {
         shotgunPellets = 4,         -- 弹丸数
         shotgunSpread = 0.35,       -- 扇形半角(弧度, ±20°)
         armor = 0.3,                -- 30%伤害减免
+    },
+    alpha = {
+        name = "头狼精锐",
+        hp = 400, speed = 50, damage = 15, radius = 18,
+        color = {180, 50, 50},
+        sightRange = 240, attackRange = 200, attackRate = 1.5,
+        bulletSpeed = 380,
+        attackPattern = "burst",    -- 三连发
+        burstCount = 3,
+        burstInterval = 0.08,
+        armor = 0.15,               -- 15%伤害减免
     },
 }
 
@@ -321,6 +335,7 @@ function Start()
         sentry = nvgCreateImage(vg, "image/wolf_sentry.png", 0),
         rusher = nvgCreateImage(vg, "image/wolf_rusher.png", 0),
         heavy  = nvgCreateImage(vg, "image/wolf_heavy.png", 0),
+        alpha  = nvgCreateImage(vg, "image/wolf_elite.png", 0),  -- 头狼复用elite素材
         elite  = nvgCreateImage(vg, "image/wolf_elite.png", 0),
         boss   = nvgCreateImage(vg, "image/wolf_boss.png", 0),
     }
@@ -329,6 +344,7 @@ function Start()
         sentry = nvgCreateImage(vg, "image/wolf_sentry_white.png", 0),
         rusher = nvgCreateImage(vg, "image/wolf_rusher_white.png", 0),
         heavy  = nvgCreateImage(vg, "image/wolf_heavy_white.png", 0),
+        alpha  = nvgCreateImage(vg, "image/wolf_elite_white.png", 0),
         elite  = nvgCreateImage(vg, "image/wolf_elite_white.png", 0),
         boss   = nvgCreateImage(vg, "image/wolf_boss_white.png", 0),
     }
@@ -337,6 +353,7 @@ function Start()
         sentry = nvgCreateImage(vg, "image/wolf_sentry_red.png", 0),
         rusher = nvgCreateImage(vg, "image/wolf_rusher_red.png", 0),
         heavy  = nvgCreateImage(vg, "image/wolf_heavy_red.png", 0),
+        alpha  = nvgCreateImage(vg, "image/wolf_elite_red.png", 0),
         elite  = nvgCreateImage(vg, "image/wolf_elite_red.png", 0),
         boss   = nvgCreateImage(vg, "image/wolf_boss_red.png", 0),
     }
@@ -554,11 +571,11 @@ function GenerateMap()
         end
     end
 
-    -- 在随机房间放置箱子(按波次权重选择稀有度)
+    -- 在随机房间放置箱子(按波次权重选择稀有度, 数量下调)
     local crateCount = 0
     for _, room in ipairs(rooms) do
-        local numCrates = math.random(1, 3)
-        for j = 1, numCrates do
+        -- 60%的房间有箱子, 每房间0-1个(大幅下调)
+        if math.random(1, 100) <= 60 then
             local cx = math.random(room.x + 1, room.x + room.w - 2)
             local cy = math.random(room.y + 1, room.y + room.h - 2)
             if mapData[cy][cx] == TILE_FLOOR then
@@ -1085,9 +1102,18 @@ function TryShoot()
     -- 弹跳次数(撞墙反弹)
     local bounceCount = math.floor(Inv.GetStat("bounceCount", 0))
 
-    -- 感电属性
+    -- 感电属性(链式闪电)
     local shockChance = Inv.GetStat("shockChance", 0)
     local shockDamage = Inv.GetStat("shockDamage", 0)
+    -- 链式闪电: 基础2跳 + 圣物chainCount + combo_chainBounce
+    local chainCount = 2 + math.floor(Inv.GetStat("chainCount", 0)) + math.floor(Inv.GetStat("combo_chainBounce", 0))
+    local chainRange = 120  -- 链式闪电搜索范围(像素)
+    -- chainDamage 圣物加成(叠加到 shockDamage)
+    local chainDmgBonus = Inv.GetStat("chainDamage", 0)
+    shockDamage = shockDamage + chainDmgBonus
+    -- combo 感电伤害百分比加成
+    local shockDmgPercent = Inv.GetStat("combo_shockDamagePercent", 0)
+    shockDamage = math.floor(shockDamage * (1.0 + shockDmgPercent / 100))
 
     -- 状态效果属性(从背包汇总)
     local burnDmg = Inv.GetStat("burnDamage", 0)
@@ -1144,9 +1170,11 @@ function TryShoot()
             pierce = pierceCount,
             bounceCount = bounceCount,  -- 弹跳次数
             hitEnemies = {},
-            -- 感电属性
+            -- 感电属性(链式闪电)
             shockChance = shockChance > 0 and shockChance or nil,
             shockDamage = shockDamage > 0 and shockDamage or nil,
+            chainCount = shockChance > 0 and chainCount or nil,
+            chainRange = shockChance > 0 and chainRange or nil,
             -- 状态效果
             burnDamage = burnDmg > 0 and burnDmg or nil,
             burnDuration = burnDmg > 0 and burnDur or nil,
@@ -1836,63 +1864,95 @@ function UpdateBullets(dt)
                         })
                     end
 
-                    -- === 感电链式闪电 ===
+                    -- === 感电链式闪电(递归最近敌人) ===
                     if b.shockChance and b.shockChance > 0 then
                         if math.random(1, 100) <= b.shockChance then
-                            -- 感电触发! 对所有存活敌人造成闪电伤害
-                            local sDmg = b.shockDamage or 15
-                            for kk = #enemies, 1, -1 do
-                                local et = enemies[kk]
-                                if et ~= e and et.hp > 0 then
-                                    local aDmg = sDmg
-                                    if et.armor and et.armor > 0 then
-                                        aDmg = math.max(1, math.floor(sDmg * (1 - et.armor)))
-                                    end
-                                    et.hp = et.hp - aDmg
-                                    et.hitFlashTimer = 0.15
-                                    -- 闪电伤害数字
-                                    table.insert(damageNumbers, {
-                                        x = et.x, y = et.y - et.radius - 5,
-                                        text = "⚡" .. tostring(aDmg),
-                                        life = 0.8, maxLife = 0.8, vy = -35,
-                                        isShock = true,
-                                    })
-                                    -- 闪电连线视觉效果(存入全局表, 渲染时绘制)
-                                    table.insert(lightningEffects, {
-                                        x1 = e.x, y1 = e.y, x2 = et.x, y2 = et.y,
-                                        life = 0.25, maxLife = 0.25,
-                                    })
-                                    -- 被电击的敌人产生电弧粒子
-                                    for sp = 1, 4 do
-                                        local sAngle = math.random() * math.pi * 2
-                                        table.insert(particles, {
-                                            x = et.x, y = et.y,
-                                            vx = math.cos(sAngle) * 40, vy = math.sin(sAngle) * 40,
-                                            life = 0.15, maxLife = 0.15,
-                                            r = 100, g = 180, b = 255,
-                                            size = 2 + math.random() * 2, glow = true,
-                                        })
-                                    end
-                                    -- 感电击杀判定(标记死亡, 不在此处remove避免破坏外层j索引)
-                                    if et.hp <= 0 and not et.dead then
-                                        et.dead = true
-                                        killCount = killCount + 1
-                                        WM.OnEnemyKilled()
-                                        score = score + 50
-                                        for sp2 = 1, 10 do
-                                            local pa2 = math.random() * math.pi * 2
-                                            local spd2 = 60 + math.random() * 100
-                                            table.insert(particles, {
-                                                x = et.x, y = et.y,
-                                                vx = math.cos(pa2) * spd2, vy = math.sin(pa2) * spd2,
-                                                life = 0.3 + math.random() * 0.3, maxLife = 0.6,
-                                                r = 80, g = 160, b = 255,
-                                                size = 2 + math.random() * 2, glow = true,
-                                            })
+                            local sDmg = b.shockDamage or 8
+                            local maxBounces = b.chainCount or 2
+                            local searchRange = b.chainRange or 120
+                            local damageDecay = 0.8  -- 每跳衰减20%
+
+                            -- 链式闪电: 从被击中敌人开始, 逐个跳到最近敌人
+                            local hitSet = {[e] = true}  -- 记录已被闪电击中的敌人
+                            local currentSource = e
+                            local currentDmg = sDmg
+
+                            for bounce = 1, maxBounces do
+                                -- 搜索范围内最近的未被击中的存活敌人
+                                local nearest = nil
+                                local nearestDist = searchRange + 1
+                                for kk = 1, #enemies do
+                                    local et = enemies[kk]
+                                    if not hitSet[et] and et.hp > 0 then
+                                        local dx = et.x - currentSource.x
+                                        local dy = et.y - currentSource.y
+                                        local dist = math.sqrt(dx * dx + dy * dy)
+                                        if dist <= searchRange and dist < nearestDist then
+                                            nearest = et
+                                            nearestDist = dist
                                         end
                                     end
                                 end
+
+                                if not nearest then break end  -- 没有可跳跃的目标, 链断裂
+
+                                -- 对目标造成伤害
+                                hitSet[nearest] = true
+                                local aDmg = math.floor(currentDmg)
+                                if nearest.armor and nearest.armor > 0 then
+                                    aDmg = math.max(1, math.floor(aDmg * (1 - nearest.armor)))
+                                end
+                                nearest.hp = nearest.hp - aDmg
+                                nearest.hitFlashTimer = 0.15
+
+                                -- 闪电伤害数字
+                                table.insert(damageNumbers, {
+                                    x = nearest.x, y = nearest.y - nearest.radius - 5,
+                                    text = "⚡" .. tostring(aDmg),
+                                    life = 0.8, maxLife = 0.8, vy = -35,
+                                    isShock = true,
+                                })
+                                -- 闪电连线视觉(从源到目标)
+                                table.insert(lightningEffects, {
+                                    x1 = currentSource.x, y1 = currentSource.y,
+                                    x2 = nearest.x, y2 = nearest.y,
+                                    life = 0.25, maxLife = 0.25,
+                                })
+                                -- 电弧粒子
+                                for sp = 1, 4 do
+                                    local sAngle = math.random() * math.pi * 2
+                                    table.insert(particles, {
+                                        x = nearest.x, y = nearest.y,
+                                        vx = math.cos(sAngle) * 40, vy = math.sin(sAngle) * 40,
+                                        life = 0.15, maxLife = 0.15,
+                                        r = 100, g = 180, b = 255,
+                                        size = 2 + math.random() * 2, glow = true,
+                                    })
+                                end
+                                -- 感电击杀判定
+                                if nearest.hp <= 0 and not nearest.dead then
+                                    nearest.dead = true
+                                    killCount = killCount + 1
+                                    WM.OnEnemyKilled()
+                                    score = score + 50
+                                    for sp2 = 1, 10 do
+                                        local pa2 = math.random() * math.pi * 2
+                                        local spd2 = 60 + math.random() * 100
+                                        table.insert(particles, {
+                                            x = nearest.x, y = nearest.y,
+                                            vx = math.cos(pa2) * spd2, vy = math.sin(pa2) * spd2,
+                                            life = 0.3 + math.random() * 0.3, maxLife = 0.6,
+                                            r = 80, g = 160, b = 255,
+                                            size = 2 + math.random() * 2, glow = true,
+                                        })
+                                    end
+                                end
+
+                                -- 准备下一跳: 衰减伤害, 更新源
+                                currentDmg = currentDmg * damageDecay
+                                currentSource = nearest
                             end
+
                             -- 起始点电弧闪光
                             table.insert(particles, {
                                 x = e.x, y = e.y, vx = 0, vy = 0,
@@ -1983,9 +2043,9 @@ function UpdateBullets(dt)
                         if e.typeKey == "sentry" then dropRarityMax = 4 end  -- 哨兵可掉紫
                         if WM.currentWave >= 5 then dropRarityMax = math.max(dropRarityMax, 4) end  -- 后期全员可掉紫
 
-                        -- 掉落率受背包加成影响
+                        -- 掉落率受背包加成影响(基础18%, 大幅下调)
                         local lootBonusPct = Inv.GetStat("lootBonus", 0)
-                        local artifactChance = 30 + lootBonusPct * 0.5   -- 基础30%
+                        local artifactChance = 18 + lootBonusPct * 0.3   -- 基础18%
 
                         if invLootRoll <= artifactChance then
                             -- 掉落圣物(掉到地面, 需要玩家走过去拾取)

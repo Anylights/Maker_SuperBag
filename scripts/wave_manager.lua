@@ -22,95 +22,95 @@ WM.PHASE_VICTORY   = "victory"    -- 全部通关
 -- ============================================================================
 -- 每波包含: 类型、敌人数量系数、敌人类型权重、地图参数、奖励类型
 WM.WAVES = {
-    -- Wave 1: 新手引导 (只有巡逻兵, 少量)
+    -- Wave 1: 新手引导 (只有巡逻兵, 少量, HP较低让玩家熟悉)
     {
         name = "森林入口",
         desc = "小狼踏入黑暗森林",
         type = "combat",
-        enemyCount = 18,
+        enemyCount = 16,
         rooms = 10,
         mapSize = {cols = 50, rows = 36},
         weights = { patrol = 100, sentry = 0, rusher = 0 },
-        hpMult = 0.7,
+        hpMult = 0.8,
         dmgMult = 0.6,
         rewardType = "choice",  -- 三选一奖励
     },
-    -- Wave 2: 引入哨兵
+    -- Wave 2: 引入哨兵, 数量渐增
     {
         name = "密林小径",
         desc = "穿越大灰狼的巡逻区",
         type = "combat",
-        enemyCount = 24,
+        enemyCount = 22,
         rooms = 12,
         mapSize = {cols = 55, rows = 40},
         weights = { patrol = 60, sentry = 40, rusher = 0 },
-        hpMult = 0.9,
+        hpMult = 1.0,
         dmgMult = 0.8,
         rewardType = "supply",  -- 补给(弹药+血)
     },
-    -- Wave 3: 引入冲锋者
+    -- Wave 3: 引入冲锋者, HP开始攀升(幂次曲线起点)
     {
         name = "灰狼哨站",
         desc = "攻破灰狼集团的前哨",
         type = "combat",
-        enemyCount = 30,
+        enemyCount = 28,
         rooms = 14,
         mapSize = {cols = 60, rows = 42},
         weights = { patrol = 40, sentry = 30, rusher = 30 },
-        hpMult = 1.0,
+        hpMult = 1.3,
         dmgMult = 1.0,
         rewardType = "choice",
     },
-    -- Wave 4: 引入重装兵(中等强化, 平滑过渡)
+    -- Wave 4: 引入重装兵+头狼精锐(精英波, HP跳跃)
     {
         name = "狼群伏击",
         desc = "遭遇灰狼精锐!",
         type = "elite",
-        enemyCount = 28,
+        enemyCount = 32,
         rooms = 12,
         mapSize = {cols = 55, rows = 40},
-        weights = { patrol = 15, sentry = 30, rusher = 35, heavy = 20 },
-        hpMult = 1.3,
-        dmgMult = 1.1,
+        weights = { patrol = 15, sentry = 25, rusher = 30, heavy = 20, alpha = 10 },
+        hpMult = 1.8,
+        dmgMult = 1.2,
         rewardType = "choice",
     },
-    -- Wave 5: 大规模战斗
+    -- Wave 5: 大规模战斗, HP继续攀升
     {
         name = "外婆家附近",
         desc = "深入灰狼集团腹地",
         type = "combat",
-        enemyCount = 38,
+        enemyCount = 40,
         rooms = 16,
         mapSize = {cols = 65, rows = 48},
-        weights = { patrol = 25, sentry = 25, rusher = 30, heavy = 20 },
-        hpMult = 1.4,
-        dmgMult = 1.3,
+        weights = { patrol = 20, sentry = 25, rusher = 25, heavy = 20, alpha = 10 },
+        hpMult = 2.4,
+        dmgMult = 1.4,
         rewardType = "supply",
     },
-    -- Wave 6: 高难度混合
+    -- Wave 6: 高难度混合, 头狼增多
     {
         name = "灰狼营地",
         desc = "捣毁灰狼集团的巢穴",
         type = "combat",
-        enemyCount = 42,
+        enemyCount = 48,
         rooms = 16,
         mapSize = {cols = 65, rows = 48},
-        weights = { patrol = 15, sentry = 25, rusher = 35, heavy = 25 },
-        hpMult = 1.6,
-        dmgMult = 1.4,
+        weights = { patrol = 10, sentry = 20, rusher = 30, heavy = 25, alpha = 15 },
+        hpMult = 3.2,
+        dmgMult = 1.6,
         rewardType = "choice",
     },
-    -- Wave 7: Boss前哨 (给玩家一波补给准备)
+    -- Wave 7: Boss前哨(精英波, HP峰值)
     {
         name = "囚禁之地",
         desc = "小红帽就在前方...",
         type = "elite",
-        enemyCount = 35,
+        enemyCount = 44,
         rooms = 14,
         mapSize = {cols = 60, rows = 42},
-        weights = { patrol = 10, sentry = 25, rusher = 40, heavy = 25 },
-        hpMult = 1.7,
-        dmgMult = 1.5,
+        weights = { patrol = 5, sentry = 20, rusher = 30, heavy = 25, alpha = 20 },
+        hpMult = 4.0,
+        dmgMult = 1.8,
         rewardType = "choice",
     },
     -- Wave 8: Boss战
@@ -118,12 +118,12 @@ WM.WAVES = {
         name = "大灰狼首领",
         desc = "击败大灰狼, 救出小红帽!",
         type = "boss",
-        enemyCount = 16,  -- 小兵 + Boss
+        enemyCount = 20,  -- 小兵 + Boss
         rooms = 8,
         mapSize = {cols = 45, rows = 35},
-        weights = { patrol = 40, sentry = 40, rusher = 20 },
-        hpMult = 1.0,
-        dmgMult = 1.0,
+        weights = { patrol = 30, sentry = 30, rusher = 20, alpha = 20 },
+        hpMult = 1.5,
+        dmgMult = 1.2,
         rewardType = "none",
     },
 }

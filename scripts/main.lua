@@ -149,6 +149,10 @@ local player = {
     fireTimer = 0,
     alive = true,
     invincibleTimer = 0,     -- 受伤无敌帧
+    shield = 0,              -- 当前护盾值
+    shieldMax = 0,           -- 最大护盾值
+    shieldRegen = 0,         -- 护盾每秒再生
+    shieldRegenDelay = 0,    -- 受击后延迟再生计时
 }
 
 -- 子弹列表
@@ -161,6 +165,8 @@ local lootItems = {}         -- {x,y,type,amount}
 local particles = {}
 -- 伤害数字
 local damageNumbers = {}
+-- 闪电特效列表
+local lightningEffects = {}  -- {x1,y1,x2,y2,life,maxLife}
 
 -- 地图数据
 local mapData = {}           -- mapData[row][col] = tileType
@@ -917,10 +923,6 @@ function TryShoot()
     -- 应用背包散布加成(负值=更精准)
     local spreadBonus = Inv.GetStat("spread", 0)
     local effectiveSpread = math.max(0, WEAPON.spread + spreadBonus)
-    local spreadRad = math.rad(effectiveSpread) * (math.random() - 0.5)
-    local angle = player.angle + spreadRad
-    local bx = player.x + math.cos(angle) * (player.radius + 5)
-    local by = player.y + math.sin(angle) * (player.radius + 5)
 
     -- 应用背包加成 + 波次奖励modifier
     local bonusDamage = Inv.GetStat("damage", 0) + WM.weaponMods.bonusDamage
@@ -935,6 +937,13 @@ function TryShoot()
     -- 穿透次数(0=普通子弹击中即消失, >0=可穿透多个敌人)
     local pierceCount = math.floor(Inv.GetStat("pierce", 0))
 
+    -- 弹跳次数(撞墙反弹)
+    local bounceCount = math.floor(Inv.GetStat("bounceCount", 0))
+
+    -- 感电属性
+    local shockChance = Inv.GetStat("shockChance", 0)
+    local shockDamage = Inv.GetStat("shockDamage", 0)
+
     -- 状态效果属性(从背包汇总)
     local burnDmg = Inv.GetStat("burnDamage", 0)
     local burnComboMult = 1.0 + (Inv.GetStat("combo_burnDamagePercent", 0) / 100)
@@ -948,41 +957,78 @@ function TryShoot()
     local comboRadiusMult = 1.0 + (Inv.GetStat("combo_explosionRadiusPercent", 0) / 100)
     explRadius = math.floor(explRadius * comboRadiusMult)
 
-    table.insert(bullets, {
-        x = bx, y = by,
-        vx = math.cos(angle) * WEAPON.bulletSpeed,
-        vy = math.sin(angle) * WEAPON.bulletSpeed,
-        damage = finalDamage,
-        radius = WEAPON.bulletRadius,
-        fromPlayer = true,
-        life = 2.0,
-        trail = {},
-        isCrit = isCrit,
-        pierce = pierceCount,
-        hitEnemies = {},  -- 已穿透过的敌人(避免重复伤害)
-        -- 状态效果
-        burnDamage = burnDmg > 0 and burnDmg or nil,
-        burnDuration = burnDmg > 0 and burnDur or nil,
-        slowAmount = slowAmt > 0 and slowAmt or nil,
-        slowDuration = slowAmt > 0 and 2.0 or nil,
-        explosionRadius = explRadius > 0 and explRadius or nil,
-        explosionDamage = explDamage > 0 and explDamage or nil,
-    })
+    -- 散弹枪: 计算总弹丸数(1 + 额外散弹)
+    local shotgunPellets = math.floor(Inv.GetStat("shotgunPellets", 0))
+    local totalPellets = 1 + shotgunPellets
+    local shotgunSpreadAngle = 0.5  -- 散弹扇形总角度(弧度, 约±28度)
+
+    for pelletIdx = 1, totalPellets do
+        -- 计算每颗弹丸的角度
+        local pelletAngle
+        if totalPellets == 1 then
+            -- 单发: 原始散布
+            local spreadRad = math.rad(effectiveSpread) * (math.random() - 0.5)
+            pelletAngle = player.angle + spreadRad
+        else
+            -- 散弹: 均匀分布在扇形内 + 微小随机偏移
+            local t = (pelletIdx - 1) / (totalPellets - 1)  -- 0~1
+            local baseOffset = (t - 0.5) * shotgunSpreadAngle
+            local jitter = (math.random() - 0.5) * 0.08  -- 微小抖动
+            pelletAngle = player.angle + baseOffset + jitter
+        end
+
+        local bx = player.x + math.cos(pelletAngle) * (player.radius + 5)
+        local by = player.y + math.sin(pelletAngle) * (player.radius + 5)
+
+        -- 散弹伤害略低(防止过于imba)
+        local pelletDamage = finalDamage
+        if shotgunPellets > 0 then
+            pelletDamage = math.max(1, math.floor(finalDamage * 0.7))
+        end
+
+        table.insert(bullets, {
+            x = bx, y = by,
+            vx = math.cos(pelletAngle) * WEAPON.bulletSpeed,
+            vy = math.sin(pelletAngle) * WEAPON.bulletSpeed,
+            damage = pelletDamage,
+            radius = WEAPON.bulletRadius,
+            fromPlayer = true,
+            life = 2.0,
+            trail = {},
+            isCrit = isCrit,
+            pierce = pierceCount,
+            bounceCount = bounceCount,  -- 弹跳次数
+            hitEnemies = {},
+            -- 感电属性
+            shockChance = shockChance > 0 and shockChance or nil,
+            shockDamage = shockDamage > 0 and shockDamage or nil,
+            -- 状态效果
+            burnDamage = burnDmg > 0 and burnDmg or nil,
+            burnDuration = burnDmg > 0 and burnDur or nil,
+            slowAmount = slowAmt > 0 and slowAmt or nil,
+            slowDuration = slowAmt > 0 and 2.0 or nil,
+            explosionRadius = explRadius > 0 and explRadius or nil,
+            explosionDamage = explDamage > 0 and explDamage or nil,
+        })
+    end
 
     player.ammo = player.ammo - 1
     player.fireTimer = math.max(0.05, WEAPON.fireRate - bonusFireRate)
 
     PlaySfx(sndShoot, 0.35)
 
-    -- 射击后坐力震动(轻微)
-    TriggerShake(1.5, 0.06)
+    -- 射击后坐力震动(散弹更强)
+    local shakeStr = shotgunPellets > 0 and 3.0 or 1.5
+    TriggerShake(shakeStr, 0.08)
 
     -- 枪口闪光粒子(火花)
+    local muzzleX = player.x + math.cos(player.angle) * (player.radius + 5)
+    local muzzleY = player.y + math.sin(player.angle) * (player.radius + 5)
     for j = 1, 8 do
-        local pa = angle + (math.random() - 0.5) * 0.8
+        local pa = player.angle + (math.random() - 0.5) * 0.8
         local spd = 150 + math.random() * 200
         table.insert(particles, {
-            x = bx, y = by,
+            x = muzzleX, y = muzzleY,
             vx = math.cos(pa) * spd,
             vy = math.sin(pa) * spd,
             life = 0.1 + math.random() * 0.1,
@@ -995,18 +1041,18 @@ function TryShoot()
 
     -- 枪口闪光圆(短暂亮光)
     table.insert(particles, {
-        x = bx, y = by, vx = 0, vy = 0,
+        x = muzzleX, y = muzzleY, vx = 0, vy = 0,
         life = 0.06, maxLife = 0.06,
         r = 255, g = 240, b = 200,
         size = 12, glow = true, drag = 1.0,
     })
 
     -- 弹壳抛出(向枪口侧方弹出, 带重力)
-    local shellAngle = angle + math.pi * 0.5 + (math.random() - 0.5) * 0.4
+    local shellAngle = player.angle + math.pi * 0.5 + (math.random() - 0.5) * 0.4
     local shellSpd = 60 + math.random() * 40
     table.insert(particles, {
-        x = player.x + math.cos(angle) * 6,
-        y = player.y + math.sin(angle) * 6,
+        x = player.x + math.cos(player.angle) * 6,
+        y = player.y + math.sin(player.angle) * 6,
         vx = math.cos(shellAngle) * shellSpd,
         vy = math.sin(shellAngle) * shellSpd,
         life = 0.5, maxLife = 0.5,
@@ -1255,6 +1301,32 @@ function HandleUpdate(eventType, eventData)
         player.hp = math.min(player.maxHp + Inv.GetStat("maxHp", 0),
             player.hp + hpRegen * dt)
     end
+
+    -- === 护盾系统更新 ===
+    local shieldMaxStat = Inv.GetStat("shieldMax", 0)
+    local shieldRegenStat = Inv.GetStat("shieldRegen", 0)
+    player.shieldMax = shieldMaxStat
+    if shieldMaxStat > 0 then
+        -- 受击后延迟恢复
+        if player.shieldRegenDelay > 0 then
+            player.shieldRegenDelay = player.shieldRegenDelay - dt
+        else
+            -- 持续恢复护盾
+            if player.shield < shieldMaxStat and shieldRegenStat > 0 then
+                player.shield = math.min(shieldMaxStat, player.shield + shieldRegenStat * dt)
+            end
+        end
+    else
+        player.shield = 0
+    end
+
+    -- === 闪电特效更新 ===
+    for i = #lightningEffects, 1, -1 do
+        lightningEffects[i].life = lightningEffects[i].life - dt
+        if lightningEffects[i].life <= 0 then
+            table.remove(lightningEffects, i)
+        end
+    end
 end
 
 -- Boss召唤小兵
@@ -1430,42 +1502,86 @@ function UpdateBullets(dt)
 
         -- 撞墙
         if IsWall(b.x, b.y) then
-            remove = true
-            -- 墙壁火花(散射)
-            for j = 1, 8 do
-                local pa = math.random() * math.pi * 2
-                local spd = 40 + math.random() * 80
+            -- 弹跳判定: bounceCount > 0 则反射, 否则销毁
+            if b.bounceCount and b.bounceCount > 0 then
+                -- 计算反射方向: 检测哪个轴穿墙
+                local prevX = b.x - b.vx * dt
+                local prevY = b.y - b.vy * dt
+                local hitHorizontal = IsWall(prevX, b.y)
+                local hitVertical = IsWall(b.x, prevY)
+                if hitHorizontal and hitVertical then
+                    b.vx = -b.vx
+                    b.vy = -b.vy
+                elseif hitHorizontal then
+                    b.vy = -b.vy
+                else
+                    b.vx = -b.vx
+                end
+                -- 回退到墙外
+                b.x = prevX
+                b.y = prevY
+                b.bounceCount = b.bounceCount - 1
+                b.life = math.max(b.life, 1.0)  -- 延长寿命
+                -- 清空已击中列表(弹跳后可再次击中)
+                if b.hitEnemies then b.hitEnemies = {} end
+
+                -- 弹跳火花(黄绿色)
+                for j = 1, 6 do
+                    local pa = math.random() * math.pi * 2
+                    local spd = 60 + math.random() * 80
+                    table.insert(particles, {
+                        x = b.x, y = b.y,
+                        vx = math.cos(pa) * spd, vy = math.sin(pa) * spd,
+                        life = 0.15 + math.random() * 0.1, maxLife = 0.25,
+                        r = 180, g = 255, b = 80,
+                        size = 1.5 + math.random() * 2, glow = true,
+                    })
+                end
+                -- 弹跳闪光
                 table.insert(particles, {
-                    x = b.x, y = b.y,
-                    vx = math.cos(pa) * spd,
-                    vy = math.sin(pa) * spd,
-                    life = 0.15 + math.random() * 0.15,
-                    maxLife = 0.3,
-                    r = 220, g = 200 + math.random(55), b = 120 + math.random(80),
-                    size = 1 + math.random() * 2,
-                    glow = true,
+                    x = b.x, y = b.y, vx = 0, vy = 0,
+                    life = 0.06, maxLife = 0.06,
+                    r = 200, g = 255, b = 150,
+                    size = 10, glow = true, drag = 1.0,
                 })
-            end
-            -- 撞击闪光
-            table.insert(particles, {
-                x = b.x, y = b.y, vx = 0, vy = 0,
-                life = 0.05, maxLife = 0.05,
-                r = 255, g = 255, b = 220,
-                size = 8, glow = true, drag = 1.0,
-            })
-            -- 碎屑(重力下落)
-            for j = 1, 3 do
-                local pa = math.random() * math.pi * 2
+            else
+                remove = true
+                -- 墙壁火花(散射)
+                for j = 1, 8 do
+                    local pa = math.random() * math.pi * 2
+                    local spd = 40 + math.random() * 80
+                    table.insert(particles, {
+                        x = b.x, y = b.y,
+                        vx = math.cos(pa) * spd,
+                        vy = math.sin(pa) * spd,
+                        life = 0.15 + math.random() * 0.15,
+                        maxLife = 0.3,
+                        r = 220, g = 200 + math.random(55), b = 120 + math.random(80),
+                        size = 1 + math.random() * 2,
+                        glow = true,
+                    })
+                end
+                -- 撞击闪光
                 table.insert(particles, {
-                    x = b.x, y = b.y,
-                    vx = math.cos(pa) * (20 + math.random() * 30),
-                    vy = math.sin(pa) * (20 + math.random() * 30),
-                    life = 0.4 + math.random() * 0.3,
-                    maxLife = 0.7,
-                    r = 100, g = 100, b = 90,
-                    size = 1.5 + math.random(),
-                    gravity = 150, drag = 0.97,
+                    x = b.x, y = b.y, vx = 0, vy = 0,
+                    life = 0.05, maxLife = 0.05,
+                    r = 255, g = 255, b = 220,
+                    size = 8, glow = true, drag = 1.0,
                 })
+                -- 碎屑(重力下落)
+                for j = 1, 3 do
+                    local pa = math.random() * math.pi * 2
+                    table.insert(particles, {
+                        x = b.x, y = b.y,
+                        vx = math.cos(pa) * (20 + math.random() * 30),
+                        vy = math.sin(pa) * (20 + math.random() * 30),
+                        life = 0.4 + math.random() * 0.3,
+                        maxLife = 0.7,
+                        r = 100, g = 100, b = 90,
+                        size = 1.5 + math.random(),
+                        gravity = 150, drag = 0.97,
+                    })
+                end
             end
         end
 
@@ -1573,6 +1689,73 @@ function UpdateBullets(dt)
                         })
                     end
 
+                    -- === 感电链式闪电 ===
+                    if b.shockChance and b.shockChance > 0 then
+                        if math.random(1, 100) <= b.shockChance then
+                            -- 感电触发! 对所有存活敌人造成闪电伤害
+                            local sDmg = b.shockDamage or 15
+                            for kk = #enemies, 1, -1 do
+                                local et = enemies[kk]
+                                if et ~= e and et.hp > 0 then
+                                    local aDmg = sDmg
+                                    if et.armor and et.armor > 0 then
+                                        aDmg = math.max(1, math.floor(sDmg * (1 - et.armor)))
+                                    end
+                                    et.hp = et.hp - aDmg
+                                    et.hitFlashTimer = 0.15
+                                    -- 闪电伤害数字
+                                    table.insert(damageNumbers, {
+                                        x = et.x, y = et.y - et.radius - 5,
+                                        text = "⚡" .. tostring(aDmg),
+                                        life = 0.8, maxLife = 0.8, vy = -35,
+                                        isShock = true,
+                                    })
+                                    -- 闪电连线视觉效果(存入全局表, 渲染时绘制)
+                                    table.insert(lightningEffects, {
+                                        x1 = e.x, y1 = e.y, x2 = et.x, y2 = et.y,
+                                        life = 0.25, maxLife = 0.25,
+                                    })
+                                    -- 被电击的敌人产生电弧粒子
+                                    for sp = 1, 4 do
+                                        local sAngle = math.random() * math.pi * 2
+                                        table.insert(particles, {
+                                            x = et.x, y = et.y,
+                                            vx = math.cos(sAngle) * 40, vy = math.sin(sAngle) * 40,
+                                            life = 0.15, maxLife = 0.15,
+                                            r = 100, g = 180, b = 255,
+                                            size = 2 + math.random() * 2, glow = true,
+                                        })
+                                    end
+                                    -- 感电击杀判定
+                                    if et.hp <= 0 then
+                                        killCount = killCount + 1
+                                        WM.OnEnemyKilled()
+                                        score = score + 50
+                                        for sp2 = 1, 10 do
+                                            local pa2 = math.random() * math.pi * 2
+                                            local spd2 = 60 + math.random() * 100
+                                            table.insert(particles, {
+                                                x = et.x, y = et.y,
+                                                vx = math.cos(pa2) * spd2, vy = math.sin(pa2) * spd2,
+                                                life = 0.3 + math.random() * 0.3, maxLife = 0.6,
+                                                r = 80, g = 160, b = 255,
+                                                size = 2 + math.random() * 2, glow = true,
+                                            })
+                                        end
+                                        table.remove(enemies, kk)
+                                    end
+                                end
+                            end
+                            -- 起始点电弧闪光
+                            table.insert(particles, {
+                                x = e.x, y = e.y, vx = 0, vy = 0,
+                                life = 0.15, maxLife = 0.15,
+                                r = 150, g = 200, b = 255,
+                                size = 20, glow = true, drag = 1.0,
+                            })
+                        end
+                    end
+
                     -- 穿透判定: pierce > 0 则不消除子弹
                     if b.pierce and b.pierce > 0 then
                         b.pierce = b.pierce - 1
@@ -1647,20 +1830,22 @@ function UpdateBullets(dt)
 
                         -- 掉落圣物/石板(背包系统)
                         local invLootRoll = math.random(1, 100)
-                        local dropRarityMax = 2  -- 默认最高掉绿色
-                        if e.typeKey == "rusher" then dropRarityMax = 3 end  -- 冲锋者可掉蓝
-                        if e.typeKey == "sentry" then dropRarityMax = 3 end  -- 哨兵可掉蓝
+                        local dropRarityMax = 3  -- 默认最高掉蓝色
+                        if e.typeKey == "rusher" then dropRarityMax = 4 end  -- 冲锋者可掉紫
+                        if e.typeKey == "sentry" then dropRarityMax = 4 end  -- 哨兵可掉紫
+                        if WM.currentWave >= 5 then dropRarityMax = math.max(dropRarityMax, 4) end  -- 后期全员可掉紫
 
                         -- 掉落率受背包加成影响
                         local lootBonusPct = Inv.GetStat("lootBonus", 0)
-                        local artifactChance = 8 + lootBonusPct * 0.3   -- 基础8%
-                        local tabletChance = artifactChance + 5          -- 额外5%掉石板
+                        local artifactChance = 25 + lootBonusPct * 0.5   -- 基础25%
+                        local tabletChance = artifactChance + 12         -- 额外12%掉石板
 
                         if invLootRoll <= artifactChance then
                             -- 掉落圣物(掉到地面, 需要玩家走过去拾取)
                             local level = 1
-                            if killCount > 10 then level = math.random(1, 2) end
-                            if killCount > 25 then level = math.random(1, 3) end
+                            if killCount > 5 then level = math.random(1, 2) end
+                            if killCount > 15 then level = math.random(1, 3) end
+                            if killCount > 30 then level = math.random(2, 4) end
                             local artifact = Inv.CreateRandomArtifact(dropRarityMax, level)
                             if artifact then
                                 table.insert(lootItems, {
@@ -1730,16 +1915,55 @@ function UpdateBullets(dt)
         if not remove and not b.fromPlayer and player.alive then
             if CircleCollision(b.x, b.y, b.radius, player.x, player.y, player.radius) then
                 if player.invincibleTimer <= 0 then
-                    player.hp = player.hp - b.damage
+                    local incomingDmg = b.damage
+                    -- 护盾吸收
+                    if player.shield > 0 then
+                        if player.shield >= incomingDmg then
+                            player.shield = player.shield - incomingDmg
+                            incomingDmg = 0
+                            -- 护盾吸收伤害数字(蓝色)
+                            table.insert(damageNumbers, {
+                                x = player.x, y = player.y - player.radius - 5,
+                                text = "🛡" .. tostring(b.damage),
+                                life = 0.8, maxLife = 0.8, vy = -40,
+                                isShield = true,
+                            })
+                            -- 护盾碎片粒子
+                            for sp = 1, 6 do
+                                local sa = math.random() * math.pi * 2
+                                table.insert(particles, {
+                                    x = player.x, y = player.y,
+                                    vx = math.cos(sa) * 60, vy = math.sin(sa) * 60,
+                                    life = 0.2, maxLife = 0.2,
+                                    r = 80, g = 160, b = 255,
+                                    size = 2 + math.random() * 2, glow = true,
+                                })
+                            end
+                        else
+                            incomingDmg = incomingDmg - player.shield
+                            -- 护盾被击穿数字
+                            table.insert(damageNumbers, {
+                                x = player.x + 15, y = player.y - player.radius - 15,
+                                text = "🛡" .. tostring(math.floor(player.shield)),
+                                life = 0.6, maxLife = 0.6, vy = -30,
+                                isShield = true,
+                            })
+                            player.shield = 0
+                        end
+                        player.shieldRegenDelay = 3.0  -- 被击后3秒才恢复护盾
+                    end
+                    if incomingDmg > 0 then
+                        player.hp = player.hp - incomingDmg
+                        -- 受伤闪红
+                        table.insert(damageNumbers, {
+                            x = player.x, y = player.y - player.radius - 5,
+                            text = tostring(incomingDmg),
+                            life = 0.8, maxLife = 0.8,
+                            vy = -40,
+                            isPlayer = true,
+                        })
+                    end
                     player.invincibleTimer = 0.3
-                    -- 受伤闪红
-                    table.insert(damageNumbers, {
-                        x = player.x, y = player.y - player.radius - 5,
-                        text = tostring(b.damage),
-                        life = 0.8, maxLife = 0.8,
-                        vy = -40,
-                        isPlayer = true,
-                    })
                     if player.hp <= 0 then
                         player.hp = 0
                         player.alive = false
@@ -2248,6 +2472,71 @@ function HandleNanoVGRender(eventType, eventData)
     -- 绘制粒子
     DrawParticles()
 
+    -- === 绘制闪电连线特效 ===
+    for _, le in ipairs(lightningEffects) do
+        local alpha = math.floor(255 * (le.life / le.maxLife))
+        local sx1 = (le.x1 - camX) * camZoom
+        local sy1 = (le.y1 - camY) * camZoom
+        local sx2 = (le.x2 - camX) * camZoom
+        local sy2 = (le.y2 - camY) * camZoom
+        -- 主闪电线(锯齿状)
+        local segments = 6
+        nvgBeginPath(vg)
+        nvgMoveTo(vg, sx1, sy1)
+        for seg = 1, segments - 1 do
+            local t = seg / segments
+            local mx = sx1 + (sx2 - sx1) * t + (math.random() - 0.5) * 12
+            local my = sy1 + (sy2 - sy1) * t + (math.random() - 0.5) * 12
+            nvgLineTo(vg, mx, my)
+        end
+        nvgLineTo(vg, sx2, sy2)
+        nvgStrokeColor(vg, nvgRGBA(120, 180, 255, alpha))
+        nvgStrokeWidth(vg, 2.5)
+        nvgStroke(vg)
+        -- 外发光
+        nvgBeginPath(vg)
+        nvgMoveTo(vg, sx1, sy1)
+        for seg = 1, segments - 1 do
+            local t = seg / segments
+            local mx = sx1 + (sx2 - sx1) * t + (math.random() - 0.5) * 16
+            local my = sy1 + (sy2 - sy1) * t + (math.random() - 0.5) * 16
+            nvgLineTo(vg, mx, my)
+        end
+        nvgLineTo(vg, sx2, sy2)
+        nvgStrokeColor(vg, nvgRGBA(80, 140, 255, math.floor(alpha * 0.3)))
+        nvgStrokeWidth(vg, 6)
+        nvgStroke(vg)
+    end
+
+    -- === 绘制玩家护盾光环 ===
+    if player.shield > 0 and player.shieldMax > 0 then
+        local px = (player.x - camX) * camZoom
+        local py = (player.y - camY) * camZoom
+        local shieldRatio = player.shield / player.shieldMax
+        local shieldAlpha = math.floor(60 + 120 * shieldRatio)
+        local shieldRadius = (player.radius + 6) * camZoom
+        -- 护盾圆环
+        nvgBeginPath(vg)
+        nvgCircle(vg, px, py, shieldRadius)
+        nvgStrokeColor(vg, nvgRGBA(80, 160, 255, shieldAlpha))
+        nvgStrokeWidth(vg, 2.0)
+        nvgStroke(vg)
+        -- 护盾弧形进度(显示剩余比例)
+        local startAngle = -math.pi / 2
+        local endAngle = startAngle + math.pi * 2 * shieldRatio
+        nvgBeginPath(vg)
+        nvgArc(vg, px, py, shieldRadius + 2, startAngle, endAngle, NVG_CW)
+        nvgStrokeColor(vg, nvgRGBA(100, 200, 255, math.floor(shieldAlpha * 1.2)))
+        nvgStrokeWidth(vg, 3.0)
+        nvgStroke(vg)
+        -- 外发光
+        nvgBeginPath(vg)
+        nvgCircle(vg, px, py, shieldRadius + 4)
+        nvgStrokeColor(vg, nvgRGBA(60, 140, 255, math.floor(shieldAlpha * 0.3)))
+        nvgStrokeWidth(vg, 5)
+        nvgStroke(vg)
+    end
+
     -- 绘制伤害数字
     DrawDamageNumbers()
 
@@ -2550,6 +2839,22 @@ local function DrawWhiteOutline(whiteImg, halfSize, imgSize)
     end
 end
 
+--- 绘制红色发光描边(用于敌人, 红色圆环 + 外层柔光)
+local function DrawRedOutline(radius)
+    -- 内层鲜红描边
+    nvgBeginPath(vg)
+    nvgCircle(vg, 0, 0, radius * 1.25)
+    nvgStrokeColor(vg, nvgRGBA(255, 40, 40, 200))
+    nvgStrokeWidth(vg, 2.5)
+    nvgStroke(vg)
+    -- 外层暗红柔光
+    nvgBeginPath(vg)
+    nvgCircle(vg, 0, 0, radius * 1.45)
+    nvgStrokeColor(vg, nvgRGBA(200, 20, 20, 70))
+    nvgStrokeWidth(vg, 3.5)
+    nvgStroke(vg)
+end
+
 function DrawPlayer()
     if not player.alive then return end
 
@@ -2733,9 +3038,8 @@ function DrawEnemies()
                 nvgScale(vg, -1, 1)
             end
 
-            -- 先绘制纯白描边
-            local eWhiteImg = imgEnemiesWhite[e.typeKey] or imgEnemiesWhite["patrol"] or -1
-            DrawWhiteOutline(eWhiteImg, halfSize, imgSize)
+            -- 先绘制红色发光描边(替代白色描边)
+            DrawRedOutline(e.radius)
 
             -- 再绘制敌人本体
             local paint = nvgImagePattern(vg, -halfSize, -halfSize, imgSize, imgSize, 0, eImg, 1.0)
@@ -2744,15 +3048,12 @@ function DrawEnemies()
             nvgFillPaint(vg, paint)
             nvgFill(vg)
         else
-            -- 备用: 纯色圆形
+            -- 备用: 纯色圆形 + 红色描边
             nvgBeginPath(vg)
             nvgCircle(vg, 0, 0, e.radius)
             nvgFillColor(vg, nvgRGBA(e.color[1], e.color[2], e.color[3], 255))
             nvgFill(vg)
-            nvgStrokeColor(vg, nvgRGBA(
-                math.floor(e.color[1] * 0.7),
-                math.floor(e.color[2] * 0.7),
-                math.floor(e.color[3] * 0.7), 255))
+            nvgStrokeColor(vg, nvgRGBA(255, 50, 50, 220))
             nvgStrokeWidth(vg, isBoss and 2.5 or 1.5)
             nvgStroke(vg)
         end
@@ -3009,6 +3310,14 @@ function DrawDamageNumbers()
             -- 燃烧DoT: 橙色小字
             nvgFontSize(vg, 10)
             nvgFillColor(vg, nvgRGBA(255, 150, 40, alpha))
+        elseif d.isShock then
+            -- 感电闪电: 蓝紫色
+            nvgFontSize(vg, 13)
+            nvgFillColor(vg, nvgRGBA(100, 180, 255, alpha))
+        elseif d.isShield then
+            -- 护盾吸收: 天蓝色
+            nvgFontSize(vg, 12)
+            nvgFillColor(vg, nvgRGBA(80, 180, 255, alpha))
         elseif d.isAoe then
             -- 爆炸AOE: 黄橙色
             nvgFontSize(vg, 12)
@@ -3543,6 +3852,31 @@ function DrawHUD(w, h)
     nvgText(vg, hpBarX + hpBarW / 2, hpBarY + hpBarH / 2,
         math.floor(player.hp) .. " / " .. math.floor(effectiveMaxHp), nil)
 
+    -- === 护盾条(血条下方, 仅有护盾时显示) ===
+    if player.shieldMax > 0 then
+        local shieldBarY = hpBarY + hpBarH + 2
+        local shieldBarH = 8
+        local shieldRatio = player.shield / player.shieldMax
+        -- 护盾背景
+        nvgBeginPath(vg)
+        nvgRoundedRect(vg, hpBarX, shieldBarY, hpBarW, shieldBarH, 3)
+        nvgFillColor(vg, nvgRGBA(0, 0, 0, 120))
+        nvgFill(vg)
+        -- 护盾条
+        if shieldRatio > 0 then
+            nvgBeginPath(vg)
+            nvgRoundedRect(vg, hpBarX, shieldBarY, hpBarW * shieldRatio, shieldBarH, 3)
+            nvgFillColor(vg, nvgRGBA(80, 160, 255, 220))
+            nvgFill(vg)
+        end
+        -- 护盾文字
+        nvgFontSize(vg, 9)
+        nvgTextAlign(vg, NVG_ALIGN_CENTER + NVG_ALIGN_MIDDLE)
+        nvgFillColor(vg, nvgRGBA(200, 230, 255, 255))
+        nvgText(vg, hpBarX + hpBarW / 2, shieldBarY + shieldBarH / 2,
+            "🛡 " .. math.floor(player.shield) .. "/" .. math.floor(player.shieldMax), nil)
+    end
+
     -- === 左上第二行: 弹药 ===
     nvgFontSize(vg, 13)
     nvgTextAlign(vg, NVG_ALIGN_LEFT + NVG_ALIGN_TOP)
@@ -3561,7 +3895,8 @@ function DrawHUD(w, h)
     else
         ammoText = WEAPON.name .. "  " .. player.ammo .. " / " .. player.totalAmmo
     end
-    nvgText(vg, hpBarX, hpBarY + hpBarH + 6, ammoText, nil)
+    local ammoYOff = player.shieldMax > 0 and (hpBarH + 12 + 6) or (hpBarH + 6)
+    nvgText(vg, hpBarX, hpBarY + ammoYOff, ammoText, nil)
 
     -- === 右上: 波次信息 ===
     local wave = WM.GetCurrentWave()

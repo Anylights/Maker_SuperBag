@@ -324,7 +324,13 @@ function Start()
     -- 给玩家初始圣物(教学引导)
     local starterArtifact = Inv.CreateArtifact("a_bullet_core", 1)
     if starterArtifact then
-        Inv.AddPendingItem(starterArtifact)
+        -- 初始物品直接放到玩家脚下, 需要按F拾取
+        table.insert(lootItems, {
+            x = player.x + math.random(-12, 12),
+            y = player.y + math.random(-12, 12),
+            type = "artifact",
+            itemData = starterArtifact,
+        })
     end
 
     -- 设置背包丢弃回调: 将物品丢到玩家脚下
@@ -335,6 +341,16 @@ function Start()
             type = item.type,  -- "artifact" 或 "tablet"
             itemData = item,
         })
+    end
+
+    -- 设置拾取放入背包回调: 从lootItems中移除对应条目
+    InvUI.onPickupPlaced = function(lootRef)
+        for i = #lootItems, 1, -1 do
+            if lootItems[i] == lootRef then
+                table.remove(lootItems, i)
+                break
+            end
+        end
     end
 
     -- 初始化波次管理器
@@ -839,6 +855,38 @@ function HandleRewardClick()
     end
 end
 
+-- ============================================================================
+-- 拾取辅助函数
+-- ============================================================================
+
+--- 获取玩家附近的圣物/石板掉落物列表
+function GetNearbyArtifactLoot(radius)
+    local result = {}
+    for _, item in ipairs(lootItems) do
+        if item.type == "artifact" or item.type == "tablet" then
+            local dx = player.x - item.x
+            local dy = player.y - item.y
+            if dx * dx + dy * dy <= radius * radius then
+                table.insert(result, item)
+            end
+        end
+    end
+    return result
+end
+
+--- 收集附近地面配件到背包UI拾取区
+function UI_CollectNearbyPickups()
+    local nearby = GetNearbyArtifactLoot(60)
+    local pickups = {}
+    for _, lootItem in ipairs(nearby) do
+        table.insert(pickups, {
+            item = lootItem.itemData,
+            lootRef = lootItem,
+        })
+    end
+    InvUI.SetPickupItems(pickups)
+end
+
 function HandleKeyDown(eventType, eventData)
     local key = eventData["Key"]:GetInt()
 
@@ -868,8 +916,21 @@ function HandleKeyDown(eventType, eventData)
         InvUI.Toggle()
         if InvUI.isOpen then
             gameTimeScale = 0.15  -- 慢速不暂停
+            -- 打开背包时收集附近地面配件到拾取区
+            UI_CollectNearbyPickups()
         else
             gameTimeScale = 1.0
+        end
+        return
+    end
+
+    -- F键拾取附近配件(打开背包+显示在拾取区)
+    if key == KEY_F and gameState == STATE_PLAYING and player.alive and not InvUI.isOpen then
+        local nearby = GetNearbyArtifactLoot(60)
+        if #nearby > 0 then
+            InvUI.Open()
+            gameTimeScale = 0.15
+            UI_CollectNearbyPickups()
         end
         return
     end
@@ -1113,21 +1174,17 @@ function HandleUpdate(eventType, eventData)
         UpdateDamageNumbers(dt)
         UpdateCamera()
 
-        -- 拾取掉落物(复用战斗中的逻辑)
+        -- 拾取掉落物(弹药/血包自动拾取, 圣物/石板需按F)
         for i = #lootItems, 1, -1 do
             local item = lootItems[i]
-            local pickupRadius = 10
             if item.type == "artifact" or item.type == "tablet" then
-                pickupRadius = 20
-            end
-            if CircleCollision(player.x, player.y, player.radius + pickupRadius, item.x, item.y, 8) then
+                -- 跳过, 由F键处理
+            elseif CircleCollision(player.x, player.y, player.radius + 10, item.x, item.y, 8) then
                 if item.type == "ammo" then
                     player.totalAmmo = player.totalAmmo + item.amount
                 elseif item.type == "health" then
                     local effectiveMaxHp = player.maxHp + Inv.GetStat("maxHp", 0)
                     player.hp = math.min(effectiveMaxHp, player.hp + item.amount)
-                elseif item.type == "artifact" or item.type == "tablet" then
-                    Inv.AddPendingItem(item.itemData)
                 end
                 table.remove(lootItems, i)
             end
@@ -1193,12 +1250,10 @@ function HandleUpdate(eventType, eventData)
         return
     end
 
-    -- 清除展示阶段: 只更新粒子
+    -- 清除展示阶段: 不再冻结游戏, 玩家可以继续搜刮
+    -- (WM.Update 会在 phaseTimer 倒计时结束后自动推进到 EXIT_OPEN)
     if WM.phase == WM.PHASE_CLEARED then
-        UpdateParticles(dt)
-        UpdateDamageNumbers(dt)
-        UpdateCamera()
-        return
+        -- 继续执行下方的正常游戏逻辑(不 return)
     end
 
     -- 命中停顿: 冻结游戏逻辑(用真实dt计时)
@@ -2320,14 +2375,13 @@ function UpdateSearch(dt)
         end
     end
 
-    -- 拾取掉落物(自动)
+    -- 拾取掉落物(弹药/血包自动拾取, 圣物/石板需按F)
     for i = #lootItems, 1, -1 do
         local item = lootItems[i]
-        local pickupRadius = 10
+        -- 圣物/石板不自动拾取, 需要按F键
         if item.type == "artifact" or item.type == "tablet" then
-            pickupRadius = 20  -- 圣物/石板拾取范围更大
-        end
-        if CircleCollision(player.x, player.y, player.radius + pickupRadius, item.x, item.y, 8) then
+            -- 跳过, 由F键处理
+        elseif CircleCollision(player.x, player.y, player.radius + 10, item.x, item.y, 8) then
             if item.type == "ammo" then
                 player.totalAmmo = player.totalAmmo + item.amount
                 table.insert(damageNumbers, {
@@ -2344,18 +2398,6 @@ function UpdateSearch(dt)
                     text = "+" .. item.amount .. " HP",
                     life = 1.0, maxLife = 1.0,
                     vy = -30,
-                })
-            elseif item.type == "artifact" or item.type == "tablet" then
-                -- 圣物/石板拾取 → 进入背包待放入列表
-                Inv.AddPendingItem(item.itemData)
-                local rarity = item.itemData.rarity or 1
-                local rarityCol = InvData.RARITY_COLORS[rarity] or {200, 200, 200}
-                table.insert(damageNumbers, {
-                    x = item.x, y = item.y - 10,
-                    text = "拾取: " .. item.itemData.name,
-                    life = 1.5, maxLife = 1.5,
-                    vy = -25,
-                    r = rarityCol[1], g = rarityCol[2], b = rarityCol[3],
                 })
             end
             table.remove(lootItems, i)
@@ -2408,7 +2450,12 @@ function RestartGame()
     -- 给初始圣物
     local starterArtifact = Inv.CreateArtifact("a_bullet_core", 1)
     if starterArtifact then
-        Inv.AddPendingItem(starterArtifact)
+        table.insert(lootItems, {
+            x = player.x + math.random(-12, 12),
+            y = player.y + math.random(-12, 12),
+            type = "artifact",
+            itemData = starterArtifact,
+        })
     end
 
     -- 重置波次管理器
@@ -2839,20 +2886,32 @@ local function DrawWhiteOutline(whiteImg, halfSize, imgSize)
     end
 end
 
---- 绘制红色发光描边(用于敌人, 红色圆环 + 外层柔光)
-local function DrawRedOutline(radius)
-    -- 内层鲜红描边
-    nvgBeginPath(vg)
-    nvgCircle(vg, 0, 0, radius * 1.25)
-    nvgStrokeColor(vg, nvgRGBA(255, 40, 40, 200))
-    nvgStrokeWidth(vg, 2.5)
-    nvgStroke(vg)
-    -- 外层暗红柔光
-    nvgBeginPath(vg)
-    nvgCircle(vg, 0, 0, radius * 1.45)
-    nvgStrokeColor(vg, nvgRGBA(200, 20, 20, 70))
-    nvgStrokeWidth(vg, 3.5)
-    nvgStroke(vg)
+--- 绘制红色轮廓描边(用于敌人, 与主角白色描边同理, 用白色剪影在8方向偏移再染红)
+local function DrawRedOutline(whiteImg, halfSize, imgSize)
+    if not whiteImg or whiteImg < 0 then return end
+    local offDist = 1.5  -- 描边宽度(像素)
+    local dirs = {
+        {1,0}, {-1,0}, {0,1}, {0,-1},
+        {0.707,0.707}, {-0.707,0.707}, {0.707,-0.707}, {-0.707,-0.707},
+    }
+    -- 逐方向绘制: 每个方向单独 save/restore 隔离合成操作
+    for _, d in ipairs(dirs) do
+        local ox, oy = d[1] * offDist, d[2] * offDist
+        nvgSave(vg)
+        -- 1) 先画白色剪影(带alpha通道, 只有角色形状部分不透明)
+        local paint = nvgImagePattern(vg, -halfSize + ox, -halfSize + oy, imgSize, imgSize, 0, whiteImg, 1.0)
+        nvgBeginPath(vg)
+        nvgRect(vg, -halfSize + ox, -halfSize + oy, imgSize, imgSize)
+        nvgFillPaint(vg, paint)
+        nvgFill(vg)
+        -- 2) 用 ATOP 在白色剪影像素上染红色(透明区域不受影响)
+        nvgGlobalCompositeOperation(vg, NVG_ATOP)
+        nvgBeginPath(vg)
+        nvgRect(vg, -halfSize + ox, -halfSize + oy, imgSize, imgSize)
+        nvgFillColor(vg, nvgRGBA(255, 40, 40, 220))
+        nvgFill(vg)
+        nvgRestore(vg)
+    end
 end
 
 function DrawPlayer()
@@ -3038,8 +3097,9 @@ function DrawEnemies()
                 nvgScale(vg, -1, 1)
             end
 
-            -- 先绘制红色发光描边(替代白色描边)
-            DrawRedOutline(e.radius)
+            -- 先绘制红色轮廓描边(贴合角色轮廓, 用白色剪影偏移+红色染色)
+            local eWhiteImg = imgEnemiesWhite[e.typeKey] or imgEnemiesWhite["patrol"] or -1
+            DrawRedOutline(eWhiteImg, halfSize, imgSize)
 
             -- 再绘制敌人本体
             local paint = nvgImagePattern(vg, -halfSize, -halfSize, imgSize, imgSize, 0, eImg, 1.0)
@@ -3240,6 +3300,76 @@ function DrawLootItems()
             nvgTextAlign(vg, NVG_ALIGN_CENTER + NVG_ALIGN_BOTTOM)
             nvgFillColor(vg, nvgRGBA(col[1], col[2], col[3], 200))
             nvgText(vg, item.x, item.y + bounce - 12, item.itemData.name, nil)
+
+            -- 靠近弹窗: 显示配件效果
+            local dx = player.x - item.x
+            local dy = player.y - item.y
+            local distSq = dx * dx + dy * dy
+            if distSq <= 60 * 60 and player.alive and not InvUI.isOpen then
+                local tmpl = item.itemData.template
+                local popX = item.x
+                local popY = item.y + bounce - 22
+                local rarityName = InvData.RARITY_NAMES[rarity] or "普通"
+                local desc = tmpl and tmpl.desc or ""
+                local itemType = item.type == "tablet" and "石板" or "圣物"
+
+                -- 弹窗尺寸
+                local popW = 120
+                local popH = 52
+                local tagLine = ""
+                if tmpl and tmpl.tags and #tmpl.tags > 0 then
+                    local tagNames = {}
+                    for _, tag in ipairs(tmpl.tags) do
+                        table.insert(tagNames, InvData.TAGS[tag] or tag)
+                    end
+                    tagLine = table.concat(tagNames, " ")
+                    popH = popH + 11
+                end
+
+                -- 背景面板
+                local bgAlpha = math.floor(200 + 30 * math.sin(t * 3))
+                nvgBeginPath(vg)
+                nvgRoundedRect(vg, popX - popW / 2, popY - popH, popW, popH, 4)
+                nvgFillColor(vg, nvgRGBA(20, 20, 30, bgAlpha))
+                nvgFill(vg)
+                nvgStrokeColor(vg, nvgRGBA(col[1], col[2], col[3], 150))
+                nvgStrokeWidth(vg, 1)
+                nvgStroke(vg)
+
+                -- 标题行: [稀有度] 物品名
+                local titleY = popY - popH + 12
+                nvgFontFace(vg, "sans")
+                nvgFontSize(vg, 10)
+                nvgTextAlign(vg, NVG_ALIGN_CENTER + NVG_ALIGN_MIDDLE)
+                nvgFillColor(vg, nvgRGBA(col[1], col[2], col[3], 255))
+                nvgText(vg, popX, titleY, "[" .. rarityName .. "] " .. item.itemData.name, nil)
+
+                -- 类型+标签行
+                local lineY = titleY + 12
+                if tagLine ~= "" then
+                    nvgFontSize(vg, 8)
+                    nvgFillColor(vg, nvgRGBA(180, 180, 200, 200))
+                    nvgText(vg, popX, lineY, itemType .. " | " .. tagLine, nil)
+                    lineY = lineY + 11
+                else
+                    nvgFontSize(vg, 8)
+                    nvgFillColor(vg, nvgRGBA(180, 180, 200, 200))
+                    nvgText(vg, popX, lineY, itemType, nil)
+                    lineY = lineY + 11
+                end
+
+                -- 效果描述
+                nvgFontSize(vg, 9)
+                nvgFillColor(vg, nvgRGBA(220, 220, 240, 240))
+                nvgText(vg, popX, lineY, desc, nil)
+
+                -- "按F拾取" 提示
+                local hintY = popY - 3
+                local hintPulse = 0.6 + 0.4 * math.sin(t * 4)
+                nvgFontSize(vg, 8)
+                nvgFillColor(vg, nvgRGBA(255, 230, 100, math.floor(255 * hintPulse)))
+                nvgText(vg, popX, hintY, "按 F 拾取", nil)
+            end
         else
             -- 弹药/血包: 原有样式
             nvgBeginPath(vg)
@@ -3923,31 +4053,33 @@ function DrawHUD(w, h)
         nvgText(vg, w - 16, 54, "敌人剩余: " .. enemyAlive, nil)
     end
 
-    -- === 待放入物品提示 ===
-    local pendingCount = Inv.GetPendingCount()
-    if pendingCount > 0 then
-        local pulse = math.sin(GetTime():GetElapsedTime() * 4) * 0.3 + 0.7
-        local notifyAlpha = math.floor(255 * pulse)
+    -- === 附近可拾取配件提示 ===
+    if not InvUI.isOpen then
+        local nearbyArtifacts = GetNearbyArtifactLoot(60)
+        if #nearbyArtifacts > 0 then
+            local pulse = math.sin(GetTime():GetElapsedTime() * 4) * 0.3 + 0.7
+            local notifyAlpha = math.floor(255 * pulse)
 
-        -- 背景条
-        local nbW = 220
-        local nbH = 28
-        local nbX = (w - nbW) / 2
-        local nbY = h - 56
+            -- 背景条
+            local nbW = 220
+            local nbH = 28
+            local nbX = (w - nbW) / 2
+            local nbY = h - 56
 
-        nvgBeginPath(vg)
-        nvgRoundedRect(vg, nbX, nbY, nbW, nbH, 6)
-        nvgFillColor(vg, nvgRGBA(30, 30, 50, math.floor(200 * pulse)))
-        nvgFill(vg)
-        nvgStrokeColor(vg, nvgRGBA(255, 200, 80, math.floor(180 * pulse)))
-        nvgStrokeWidth(vg, 1)
-        nvgStroke(vg)
+            nvgBeginPath(vg)
+            nvgRoundedRect(vg, nbX, nbY, nbW, nbH, 6)
+            nvgFillColor(vg, nvgRGBA(30, 30, 50, math.floor(200 * pulse)))
+            nvgFill(vg)
+            nvgStrokeColor(vg, nvgRGBA(255, 200, 80, math.floor(180 * pulse)))
+            nvgStrokeWidth(vg, 1)
+            nvgStroke(vg)
 
-        nvgFontSize(vg, 12)
-        nvgTextAlign(vg, NVG_ALIGN_CENTER + NVG_ALIGN_MIDDLE)
-        nvgFillColor(vg, nvgRGBA(255, 220, 80, notifyAlpha))
-        nvgText(vg, w / 2, nbY + nbH / 2,
-            "Tab 打开背包 (" .. pendingCount .. "个新物品)", nil)
+            nvgFontSize(vg, 12)
+            nvgTextAlign(vg, NVG_ALIGN_CENTER + NVG_ALIGN_MIDDLE)
+            nvgFillColor(vg, nvgRGBA(255, 220, 80, notifyAlpha))
+            nvgText(vg, w / 2, nbY + nbH / 2,
+                "按 F 拾取 (" .. #nearbyArtifacts .. "个配件)", nil)
+        end
     end
 
     -- === 底部: 操作提示 ===

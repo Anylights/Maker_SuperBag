@@ -237,7 +237,7 @@ function Start()
         return
     end
 
-    fontNormal = nvgCreateFont(vg, "sans", "Fonts/MiSans-Regular.ttf")
+    fontNormal = nvgCreateFont(vg, "sans", "fonts/写意体_100font/WrittenSC-Regular.ttf")
     if fontNormal == -1 then
         print("ERROR: Failed to load font")
     end
@@ -2289,7 +2289,7 @@ function HandleNanoVGRender(eventType, eventData)
 
         -- "出口"文字(世界空间)
         nvgFontFace(vg, "sans")
-        nvgFontSize(vg, 12)
+        nvgFontSize(vg, 10)
         nvgTextAlign(vg, NVG_ALIGN_CENTER + NVG_ALIGN_BOTTOM)
         nvgFillColor(vg, nvgRGBA(80, 255, 120, math.floor(200 * pulse)))
         nvgText(vg, WM.exitX, WM.exitY - TILE_SIZE * 1.8, "出口", nil)
@@ -2836,7 +2836,7 @@ function DrawEnemies()
         -- 警觉标记
         if e.state == "alert" or e.state == "chase" then
             nvgFontFace(vg, "sans")
-            nvgFontSize(vg, 14)
+            nvgFontSize(vg, 12)
             nvgTextAlign(vg, NVG_ALIGN_CENTER + NVG_ALIGN_MIDDLE)
             nvgFillColor(vg, nvgRGBA(255, 80, 80, 220))
             nvgText(vg, e.x, e.y - e.radius * 1.4 - 16, "!", nil)
@@ -2935,7 +2935,7 @@ function DrawLootItems()
 
             -- 物品名称(头顶)
             nvgFontFace(vg, "sans")
-            nvgFontSize(vg, 9)
+            nvgFontSize(vg, 8)
             nvgTextAlign(vg, NVG_ALIGN_CENTER + NVG_ALIGN_BOTTOM)
             nvgFillColor(vg, nvgRGBA(col[1], col[2], col[3], 200))
             nvgText(vg, item.x, item.y + bounce - 12, item.itemData.name, nil)
@@ -3003,25 +3003,25 @@ function DrawDamageNumbers()
         local alpha = math.floor((d.life / d.maxLife) * 255)
         if d.isCrit then
             -- 暴击: 金色大字
-            nvgFontSize(vg, 20)
+            nvgFontSize(vg, 17)
             nvgFillColor(vg, nvgRGBA(255, 210, 50, alpha))
         elseif d.isBurn then
             -- 燃烧DoT: 橙色小字
-            nvgFontSize(vg, 11)
+            nvgFontSize(vg, 9)
             nvgFillColor(vg, nvgRGBA(255, 150, 40, alpha))
         elseif d.isAoe then
             -- 爆炸AOE: 黄橙色
-            nvgFontSize(vg, 13)
+            nvgFontSize(vg, 11)
             nvgFillColor(vg, nvgRGBA(255, 180, 60, alpha))
         elseif d.isPlayer then
-            nvgFontSize(vg, 14)
+            nvgFontSize(vg, 12)
             nvgFillColor(vg, nvgRGBA(255, 80, 80, alpha))
         elseif d.r and d.g and d.b then
             -- 自定义颜色(如拾取物品)
-            nvgFontSize(vg, 13)
+            nvgFontSize(vg, 11)
             nvgFillColor(vg, nvgRGBA(d.r, d.g, d.b, alpha))
         else
-            nvgFontSize(vg, 14)
+            nvgFontSize(vg, 12)
             nvgFillColor(vg, nvgRGBA(255, 255, 255, alpha))
         end
         nvgText(vg, d.x, d.y, d.text, nil)
@@ -3102,7 +3102,7 @@ function DrawSearchProgress()
 
     -- 文字
     nvgFontFace(vg, "sans")
-    nvgFontSize(vg, 11)
+    nvgFontSize(vg, 9)
     nvgTextAlign(vg, NVG_ALIGN_CENTER + NVG_ALIGN_MIDDLE)
     nvgFillColor(vg, nvgRGBA(255, 255, 255, 220))
     nvgText(vg, cx, cy - 28, "搜索中...", nil)
@@ -3125,21 +3125,21 @@ function DrawWaveCleared(w, h)
 
     -- 主标题: "波次清除!"
     local pulse = math.sin(GetTime():GetElapsedTime() * 5) * 0.2 + 0.8
-    nvgFontSize(vg, 36)
+    nvgFontSize(vg, 30)
     nvgFillColor(vg, nvgRGBA(80, 255, 120, math.floor(255 * pulse)))
     nvgText(vg, w / 2, h / 2 - 20, "敌人已清除!", nil)
 
     -- 副标题
     local wave = WM.GetCurrentWave()
     local desc = wave and wave.name or ""
-    nvgFontSize(vg, 16)
+    nvgFontSize(vg, 14)
     nvgFillColor(vg, nvgRGBA(200, 220, 200, 200))
     nvgText(vg, w / 2, h / 2 + 16,
         "Wave " .. WM.currentWave .. " 「" .. desc .. "」 完成", nil)
 
     -- 倒计时提示
     local remaining = math.max(0, math.ceil(WM.phaseTimer))
-    nvgFontSize(vg, 13)
+    nvgFontSize(vg, 11)
     nvgFillColor(vg, nvgRGBA(180, 180, 180, 180))
     nvgText(vg, w / 2, h / 2 + 44,
         remaining .. " 秒后开放出口...", nil)
@@ -3202,7 +3202,7 @@ function DrawExitIndicator(w, h)
         -- 距离文字
         local distText = math.floor(dist / TILE_SIZE) .. "m"
         nvgFontFace(vg, "sans")
-        nvgFontSize(vg, 11)
+        nvgFontSize(vg, 9)
         nvgTextAlign(vg, NVG_ALIGN_CENTER + NVG_ALIGN_MIDDLE)
         nvgFillColor(vg, nvgRGBA(200, 255, 200, arrowAlpha))
         nvgText(vg, ax, ay + 24, distText, nil)
@@ -3211,7 +3211,7 @@ function DrawExitIndicator(w, h)
     -- 顶部提示文字
     local hintPulse = 0.6 + 0.4 * math.sin(t * 3)
     nvgFontFace(vg, "sans")
-    nvgFontSize(vg, 18)
+    nvgFontSize(vg, 15)
     nvgTextAlign(vg, NVG_ALIGN_CENTER + NVG_ALIGN_MIDDLE)
 
     if WM.phase == WM.PHASE_WALKOUT then
@@ -3222,7 +3222,7 @@ function DrawExitIndicator(w, h)
         nvgText(vg, w / 2, 48, "前往出口撤离!", nil)
 
         -- 距离提示(居中, 小字)
-        nvgFontSize(vg, 13)
+        nvgFontSize(vg, 11)
         nvgFillColor(vg, nvgRGBA(180, 220, 180, 180))
         nvgText(vg, w / 2, 68, math.floor(dist / TILE_SIZE) .. " 米", nil)
     end
@@ -3244,24 +3244,24 @@ function DrawRewardScreen(w, h)
 
     if isSupply then
         -- 补给奖励: 自动获得
-        nvgFontSize(vg, 28)
+        nvgFontSize(vg, 23)
         nvgFillColor(vg, nvgRGBA(100, 220, 255, 255))
         nvgText(vg, w / 2, h / 2 - 40, "发现补给!", nil)
 
-        nvgFontSize(vg, 16)
+        nvgFontSize(vg, 14)
         nvgFillColor(vg, nvgRGBA(200, 220, 200, 220))
         nvgText(vg, w / 2, h / 2, "弹药 +20  HP +25", nil)
 
-        nvgFontSize(vg, 14)
+        nvgFontSize(vg, 12)
         nvgFillColor(vg, nvgRGBA(180, 180, 180, 180))
         nvgText(vg, w / 2, h / 2 + 35, "点击继续", nil)
     else
         -- 三选一奖励
-        nvgFontSize(vg, 26)
+        nvgFontSize(vg, 22)
         nvgFillColor(vg, nvgRGBA(255, 220, 80, 255))
         nvgText(vg, w / 2, h * 0.18, "选择装备强化", nil)
 
-        nvgFontSize(vg, 13)
+        nvgFontSize(vg, 11)
         nvgFillColor(vg, nvgRGBA(180, 180, 180, 200))
         nvgText(vg, w / 2, h * 0.18 + 24, "A/D 或 ←/→ 切换  |  Enter/Space/点击 确认", nil)
 
@@ -3310,7 +3310,7 @@ function DrawRewardScreen(w, h)
             DrawRewardIcon(iconCX, iconY + iconSize / 2, iconSize, reward.icon, selected)
 
             -- 名称
-            nvgFontSize(vg, 15)
+            nvgFontSize(vg, 13)
             nvgTextAlign(vg, NVG_ALIGN_CENTER + NVG_ALIGN_MIDDLE)
             if selected then
                 nvgFillColor(vg, nvgRGBA(255, 240, 200, 255))
@@ -3320,12 +3320,12 @@ function DrawRewardScreen(w, h)
             nvgText(vg, cx + cardW / 2, iconY + iconSize + 20, reward.name, nil)
 
             -- 描述
-            nvgFontSize(vg, 12)
+            nvgFontSize(vg, 10)
             nvgFillColor(vg, nvgRGBA(160, 170, 180, 200))
             nvgText(vg, cx + cardW / 2, iconY + iconSize + 42, reward.desc, nil)
 
             -- 序号提示
-            nvgFontSize(vg, 11)
+            nvgFontSize(vg, 9)
             nvgFillColor(vg, nvgRGBA(120, 120, 130, 160))
             nvgText(vg, cx + cardW / 2, cardY + cardH - 16, "[" .. i .. "]", nil)
         end
@@ -3436,14 +3436,14 @@ function DrawWaveAnnounce(w, h)
     -- 波次标题
     local wave = WM.GetCurrentWave()
     local waveName = wave and wave.name or ""
-    nvgFontSize(vg, 28)
+    nvgFontSize(vg, 23)
     nvgFillColor(vg, nvgRGBA(255, 220, 80, a))
     nvgText(vg, w / 2, h / 2 - 12,
         "Wave " .. WM.currentWave .. " — " .. waveName, nil)
 
     -- 描述
     if wave and wave.desc then
-        nvgFontSize(vg, 14)
+        nvgFontSize(vg, 12)
         nvgFillColor(vg, nvgRGBA(200, 210, 220, math.floor(a * 0.8)))
         nvgText(vg, w / 2, h / 2 + 16, wave.desc, nil)
     end
@@ -3461,7 +3461,7 @@ function DrawBossHPBar(w, h)
 
     -- 名称
     nvgFontFace(vg, "sans")
-    nvgFontSize(vg, 13)
+    nvgFontSize(vg, 11)
     nvgTextAlign(vg, NVG_ALIGN_CENTER + NVG_ALIGN_BOTTOM)
     nvgFillColor(vg, nvgRGBA(255, 100, 80, 240))
     nvgText(vg, w / 2, barY - 2, boss.name or "BOSS", nil)
@@ -3496,7 +3496,7 @@ function DrawBossHPBar(w, h)
     nvgStroke(vg)
 
     -- HP 文字
-    nvgFontSize(vg, 11)
+    nvgFontSize(vg, 9)
     nvgTextAlign(vg, NVG_ALIGN_CENTER + NVG_ALIGN_MIDDLE)
     nvgFillColor(vg, nvgRGBA(255, 255, 255, 220))
     nvgText(vg, w / 2, barY + barH / 2,
@@ -3537,14 +3537,14 @@ function DrawHUD(w, h)
     nvgFill(vg)
 
     -- 血量文字
-    nvgFontSize(vg, 12)
+    nvgFontSize(vg, 10)
     nvgTextAlign(vg, NVG_ALIGN_CENTER + NVG_ALIGN_MIDDLE)
     nvgFillColor(vg, nvgRGBA(255, 255, 255, 255))
     nvgText(vg, hpBarX + hpBarW / 2, hpBarY + hpBarH / 2,
         math.floor(player.hp) .. " / " .. math.floor(effectiveMaxHp), nil)
 
     -- === 左上第二行: 弹药 ===
-    nvgFontSize(vg, 14)
+    nvgFontSize(vg, 12)
     nvgTextAlign(vg, NVG_ALIGN_LEFT + NVG_ALIGN_TOP)
     local ammoColor
     if player.reloading then
@@ -3567,7 +3567,7 @@ function DrawHUD(w, h)
     local wave = WM.GetCurrentWave()
     local waveName = wave and wave.name or ("第" .. WM.currentWave .. "波")
     local waveLabel = "Wave " .. WM.currentWave .. "/" .. #WM.WAVES .. "  " .. waveName
-    nvgFontSize(vg, 15)
+    nvgFontSize(vg, 13)
     nvgTextAlign(vg, NVG_ALIGN_RIGHT + NVG_ALIGN_TOP)
     nvgFillColor(vg, nvgRGBA(255, 220, 80, 240))
     nvgText(vg, w - 16, 16, waveLabel, nil)
@@ -3576,14 +3576,14 @@ function DrawHUD(w, h)
     local timeMin = math.floor(gameTime / 60)
     local timeSec = math.floor(gameTime % 60)
     local timeStr = string.format("%d:%02d", timeMin, timeSec)
-    nvgFontSize(vg, 13)
+    nvgFontSize(vg, 11)
     nvgFillColor(vg, nvgRGBA(200, 200, 200, 220))
     nvgText(vg, w - 16, 36, timeStr .. "  击杀:" .. killCount .. "  分数:" .. score, nil)
 
     -- === 右上第三行: 剩余敌人 ===
     local enemyAlive = #enemies
     if enemyAlive > 0 then
-        nvgFontSize(vg, 12)
+        nvgFontSize(vg, 10)
         nvgFillColor(vg, nvgRGBA(255, 120, 120, 200))
         nvgText(vg, w - 16, 54, "敌人剩余: " .. enemyAlive, nil)
     end
@@ -3608,7 +3608,7 @@ function DrawHUD(w, h)
         nvgStrokeWidth(vg, 1)
         nvgStroke(vg)
 
-        nvgFontSize(vg, 13)
+        nvgFontSize(vg, 11)
         nvgTextAlign(vg, NVG_ALIGN_CENTER + NVG_ALIGN_MIDDLE)
         nvgFillColor(vg, nvgRGBA(255, 220, 80, notifyAlpha))
         nvgText(vg, w / 2, nbY + nbH / 2,
@@ -3616,7 +3616,7 @@ function DrawHUD(w, h)
     end
 
     -- === 底部: 操作提示 ===
-    nvgFontSize(vg, 12)
+    nvgFontSize(vg, 10)
     nvgTextAlign(vg, NVG_ALIGN_CENTER + NVG_ALIGN_BOTTOM)
     nvgFillColor(vg, nvgRGBA(200, 200, 200, 160))
     nvgText(vg, w / 2, h - 12, "WASD移动 | 鼠标瞄准 | 左键射击 | R换弹 | Tab背包", nil)
@@ -3711,20 +3711,20 @@ function DrawEndScreen(w, h)
     nvgTextAlign(vg, NVG_ALIGN_CENTER + NVG_ALIGN_MIDDLE)
 
     -- 标题
-    nvgFontSize(vg, 32)
+    nvgFontSize(vg, 26)
     if isVictory then
         local pulse = math.sin(GetTime():GetElapsedTime() * 3) * 0.15 + 0.85
         nvgFillColor(vg, nvgRGBA(255, 220, 60, math.floor(255 * pulse)))
         nvgText(vg, w / 2, panelY + 42, "小红帽获救!", nil)
         -- 副标题
-        nvgFontSize(vg, 15)
+        nvgFontSize(vg, 13)
         nvgFillColor(vg, nvgRGBA(180, 220, 255, 220))
         nvgText(vg, w / 2, panelY + 68, "大灰狼集团已被击溃!", nil)
     else
         nvgFillColor(vg, nvgRGBA(255, 80, 80, 255))
         nvgText(vg, w / 2, panelY + 45, "小狼倒下了...", nil)
         -- 失败时显示波次进度
-        nvgFontSize(vg, 14)
+        nvgFontSize(vg, 12)
         nvgFillColor(vg, nvgRGBA(180, 180, 180, 200))
         nvgText(vg, w / 2, panelY + 72,
             "进度: Wave " .. WM.currentWave .. "/" .. #WM.WAVES, nil)
@@ -3732,7 +3732,7 @@ function DrawEndScreen(w, h)
 
     -- 统计
     local statY = isVictory and (panelY + 100) or (panelY + 100)
-    nvgFontSize(vg, 16)
+    nvgFontSize(vg, 14)
     nvgFillColor(vg, nvgRGBA(220, 220, 220, 255))
     nvgText(vg, w / 2, statY, "击退灰狼: " .. killCount, nil)
     nvgText(vg, w / 2, statY + 25, "分数: " .. score, nil)
@@ -3752,7 +3752,7 @@ function DrawEndScreen(w, h)
             table.insert(modsText, "弹匣+" .. WM.weaponMods.bonusMagSize)
         end
         if #modsText > 0 then
-            nvgFontSize(vg, 13)
+            nvgFontSize(vg, 11)
             nvgFillColor(vg, nvgRGBA(160, 220, 255, 200))
             nvgText(vg, w / 2, statY + 78,
                 "获得强化: " .. table.concat(modsText, "  "), nil)
@@ -3760,7 +3760,7 @@ function DrawEndScreen(w, h)
     end
 
     -- 重新开始提示
-    nvgFontSize(vg, 14)
+    nvgFontSize(vg, 12)
     nvgFillColor(vg, nvgRGBA(160, 160, 160, 200))
     local bottomY = panelY + panelH - 30
     nvgText(vg, w / 2, bottomY, "点击任意处再次出发", nil)

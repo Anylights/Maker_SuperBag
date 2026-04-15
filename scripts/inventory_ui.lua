@@ -282,14 +282,14 @@ function UI.Draw(nvg, logicalW, logicalH, mouseX, mouseY)
 
     -- === 3. 标题 ===
     nvgFontFace(nvg, "sans")
-    nvgFontSize(nvg, 20)
+    nvgFontSize(nvg, 17)
     nvgTextAlign(nvg, NVG_ALIGN_LEFT + NVG_ALIGN_MIDDLE)
     nvgFillColor(nvg, nvgRGBA(220, 220, 240, math.floor(255 * alpha)))
     nvgText(nvg, panelX + 16, panelY + 25, "背包", nil)
 
     -- 背包容量提示
     local placedCount = #Inv.items
-    nvgFontSize(nvg, 13)
+    nvgFontSize(nvg, 11)
     nvgFillColor(nvg, nvgRGBA(160, 160, 180, math.floor(200 * alpha)))
     nvgTextAlign(nvg, NVG_ALIGN_RIGHT + NVG_ALIGN_MIDDLE)
     nvgText(nvg, panelX + panelW - 16, panelY + 25,
@@ -324,7 +324,7 @@ function UI.Draw(nvg, logicalW, logicalH, mouseX, mouseY)
     UI.DrawPendingItems(nvg, alpha)
 
     -- === 12. 操作提示 ===
-    nvgFontSize(nvg, 11)
+    nvgFontSize(nvg, 9)
     nvgTextAlign(nvg, NVG_ALIGN_CENTER + NVG_ALIGN_BOTTOM)
     nvgFillColor(nvg, nvgRGBA(140, 140, 160, math.floor(160 * alpha)))
     nvgText(nvg, logicalW / 2, logicalH - 10,
@@ -402,18 +402,18 @@ function UI.DrawItem(nvg, item, x, y, scale, alpha)
     if item.type == "tablet" then
         -- 石板用特殊标记
         local tmplColor = item.template.color or {200, 200, 200}
-        nvgFontSize(nvg, 16 * scale)
+        nvgFontSize(nvg, 14 * scale)
         nvgTextAlign(nvg, NVG_ALIGN_CENTER + NVG_ALIGN_MIDDLE)
         nvgFillColor(nvg, nvgRGBA(tmplColor[1], tmplColor[2], tmplColor[3], math.floor(255 * alpha)))
         nvgText(nvg, x + pw / 2, y + ph / 2 - 4 * scale, "◆", nil)
 
         -- 石板名称(小字)
-        nvgFontSize(nvg, 9 * scale)
+        nvgFontSize(nvg, 8 * scale)
         nvgFillColor(nvg, nvgRGBA(200, 200, 220, math.floor(200 * alpha)))
         nvgText(nvg, x + pw / 2, y + ph / 2 + 10 * scale, item.name, nil)
     else
         -- 圣物: 显示图标文字 + 名称
-        nvgFontSize(nvg, 11 * scale)
+        nvgFontSize(nvg, 9 * scale)
         nvgTextAlign(nvg, NVG_ALIGN_CENTER + NVG_ALIGN_MIDDLE)
         nvgFillColor(nvg, nvgRGBA(rarityCol[1], rarityCol[2], rarityCol[3], math.floor(255 * alpha)))
 
@@ -426,7 +426,7 @@ function UI.DrawItem(nvg, item, x, y, scale, alpha)
 
         -- 等级标记
         if item.level and item.level > 1 then
-            nvgFontSize(nvg, 9 * scale)
+            nvgFontSize(nvg, 8 * scale)
             nvgTextAlign(nvg, NVG_ALIGN_RIGHT + NVG_ALIGN_BOTTOM)
             nvgFillColor(nvg, nvgRGBA(255, 220, 80, math.floor(220 * alpha)))
             nvgText(nvg, x + pw - 4, y + ph - 3, "Lv" .. item.level, nil)
@@ -530,7 +530,7 @@ function UI.DrawDragPreview(nvg, mouseX, mouseY, alpha)
     -- 面板外: 显示丢弃提示
     if outsidePanel then
         nvgFontFace(nvg, "sans")
-        nvgFontSize(nvg, 12)
+        nvgFontSize(nvg, 10)
         nvgTextAlign(nvg, NVG_ALIGN_CENTER + NVG_ALIGN_TOP)
         nvgFillColor(nvg, nvgRGBA(255, 80, 80, math.floor(220 * alpha)))
         nvgText(nvg, mouseX, mouseY + h * cellSize / 2 + 4, "松开丢弃", nil)
@@ -566,13 +566,13 @@ function UI.DrawItemTooltip(nvg, item, mx, my, logicalW, logicalH, alpha)
 
     -- 名称
     nvgFontFace(nvg, "sans")
-    nvgFontSize(nvg, 15)
+    nvgFontSize(nvg, 13)
     nvgTextAlign(nvg, NVG_ALIGN_LEFT + NVG_ALIGN_TOP)
     nvgFillColor(nvg, nvgRGBA(rarityCol[1], rarityCol[2], rarityCol[3], math.floor(255 * alpha)))
     nvgText(nvg, tipX + 10, tipY + 8, item.name, nil)
 
     -- 稀有度
-    nvgFontSize(nvg, 11)
+    nvgFontSize(nvg, 9)
     nvgFillColor(nvg, nvgRGBA(160, 160, 180, math.floor(200 * alpha)))
     local sizeStr = item.sizeW .. "×" .. item.sizeH
     local rarityName = Data.RARITY_NAMES[item.rarity] or ""
@@ -592,14 +592,14 @@ function UI.DrawItemTooltip(nvg, item, mx, my, logicalW, logicalH, alpha)
         local tmpl = item.template
         if tmpl and tmpl.desc then
             nvgFillColor(nvg, nvgRGBA(200, 200, 220, math.floor(200 * alpha)))
-            nvgFontSize(nvg, 11)
+            nvgFontSize(nvg, 9)
             nvgText(nvg, tipX + 10, yOff, tmpl.desc, nil)
             yOff = yOff + 18
         end
 
         -- 标签
         if item.tags and #item.tags > 0 then
-            nvgFontSize(nvg, 10)
+            nvgFontSize(nvg, 9)
             for _, tag in ipairs(item.tags) do
                 local tagCol = Data.TAG_COLORS[tag] or {180, 180, 180}
                 local tagName = Data.TAGS[tag] or tag
@@ -621,7 +621,7 @@ function UI.DrawItemTooltip(nvg, item, mx, my, logicalW, logicalH, alpha)
         -- 描述
         if tmpl.desc then
             nvgFillColor(nvg, nvgRGBA(200, 200, 220, math.floor(200 * alpha)))
-            nvgFontSize(nvg, 11)
+            nvgFontSize(nvg, 9)
             nvgText(nvg, tipX + 10, yOff, tmpl.desc, nil)
             yOff = yOff + 16
         end
@@ -629,7 +629,7 @@ function UI.DrawItemTooltip(nvg, item, mx, my, logicalW, logicalH, alpha)
         -- 负面效果
         if tmpl.penaltyStats then
             nvgFillColor(nvg, nvgRGBA(255, 80, 80, math.floor(220 * alpha)))
-            nvgFontSize(nvg, 10)
+            nvgFontSize(nvg, 9)
             for k, v in pairs(tmpl.penaltyStats) do
                 nvgText(nvg, tipX + 10, yOff, "负面: " .. k .. " " .. v, nil)
                 yOff = yOff + 14
@@ -644,7 +644,7 @@ function UI.DrawStatsPanel(nvg, alpha)
 
     -- 面板标题
     nvgFontFace(nvg, "sans")
-    nvgFontSize(nvg, 14)
+    nvgFontSize(nvg, 12)
     nvgTextAlign(nvg, NVG_ALIGN_LEFT + NVG_ALIGN_TOP)
     nvgFillColor(nvg, nvgRGBA(200, 200, 220, math.floor(240 * alpha)))
     nvgText(nvg, x, y, "装备加成", nil)
@@ -653,13 +653,13 @@ function UI.DrawStatsPanel(nvg, alpha)
 
     local statLines = Inv.GetStatSummary()
     if #statLines == 0 then
-        nvgFontSize(nvg, 11)
+        nvgFontSize(nvg, 9)
         nvgFillColor(nvg, nvgRGBA(120, 120, 140, math.floor(160 * alpha)))
         nvgText(nvg, x, y, "放入圣物以获得加成", nil)
         return
     end
 
-    nvgFontSize(nvg, 11)
+    nvgFontSize(nvg, 9)
     for _, line in ipairs(statLines) do
         -- 属性名
         nvgFillColor(nvg, nvgRGBA(160, 160, 180, math.floor(200 * alpha)))
@@ -684,20 +684,20 @@ function UI.DrawCombos(nvg, alpha)
     local y = statsAreaY + 180
 
     nvgFontFace(nvg, "sans")
-    nvgFontSize(nvg, 14)
+    nvgFontSize(nvg, 12)
     nvgTextAlign(nvg, NVG_ALIGN_LEFT + NVG_ALIGN_TOP)
     nvgFillColor(nvg, nvgRGBA(200, 200, 220, math.floor(240 * alpha)))
     nvgText(nvg, x, y, "Combo", nil)
     y = y + 20
 
     if #Inv.activeCombos == 0 then
-        nvgFontSize(nvg, 11)
+        nvgFontSize(nvg, 9)
         nvgFillColor(nvg, nvgRGBA(120, 120, 140, math.floor(160 * alpha)))
         nvgText(nvg, x, y, "集齐同类标签激活", nil)
         return
     end
 
-    nvgFontSize(nvg, 11)
+    nvgFontSize(nvg, 9)
     for _, ac in ipairs(Inv.activeCombos) do
         local tagCol = Data.TAG_COLORS[ac.combo.tag] or {200, 200, 200}
 
@@ -708,9 +708,9 @@ function UI.DrawCombos(nvg, alpha)
 
         -- 效果描述
         nvgFillColor(nvg, nvgRGBA(180, 180, 200, math.floor(180 * alpha)))
-        nvgFontSize(nvg, 10)
+        nvgFontSize(nvg, 9)
         nvgText(nvg, x + 8, y, ac.effect.desc, nil)
-        nvgFontSize(nvg, 11)
+        nvgFontSize(nvg, 9)
         y = y + 16
     end
 end
@@ -723,7 +723,7 @@ function UI.DrawPendingItems(nvg, alpha)
 
     -- 标题
     nvgFontFace(nvg, "sans")
-    nvgFontSize(nvg, 13)
+    nvgFontSize(nvg, 11)
     nvgTextAlign(nvg, NVG_ALIGN_LEFT + NVG_ALIGN_TOP)
     nvgFillColor(nvg, nvgRGBA(255, 200, 80, math.floor(240 * alpha)))
     nvgText(nvg, x, y, "待放入 (" .. #Inv.pendingItems .. ")", nil)

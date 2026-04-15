@@ -128,7 +128,7 @@ local waveAnnounceText = ""   -- 公告文本
 -- 相机偏移(世界坐标 → 屏幕坐标)
 local camX = 0
 local camY = 0
-local camZoom = 0.75          -- 相机缩放(< 1 = 缩小看到更多, 1 = 原始比例)
+local camZoom = 1.3           -- 相机缩放(< 1 = 缩小看到更多, 1 = 原始比例)
 
 -- 屏幕尺寸
 local screenW = 0
@@ -822,7 +822,7 @@ function HandleRewardClick()
     WM.StartTransition()
     WM.transitCallback = function()
         -- 此时 AdvanceWave 已执行, currentWave 已是新波次
-        camZoom = 0.75  -- 恢复默认缩放
+        camZoom = 1.3   -- 恢复默认缩放
         GenerateMap()
         SpawnEnemies()
         local newWave = WM.GetCurrentWave()

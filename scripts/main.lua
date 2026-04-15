@@ -233,6 +233,14 @@ local player = {
     shieldMax = 0,           -- 最大护盾值
     shieldRegen = 0,         -- 护盾每秒再生
     shieldRegenDelay = 0,    -- 受击后延迟再生计时
+    -- 近战系统
+    meleeTimer = 0,          -- 近战冷却计时
+    meleeSwingTimer = 0,     -- 挥击动画计时(>0时正在挥击)
+    meleeSwingDur = 0.25,    -- 挥击持续时间
+    meleeCooldown = 0.4,     -- 近战攻击间隔
+    meleeRange = 35,         -- 近战攻击范围(像素)
+    meleeArc = math.pi * 0.8, -- 近战扇形角度(弧度, 约144度)
+    meleeHitDone = false,    -- 本次挥击是否已判定
 }
 
 -- 子弹列表
@@ -1067,6 +1075,15 @@ function HandleKeyDown(eventType, eventData)
     end
 end
 
+function TryMelee()
+    if player.meleeTimer > 0 then return end       -- 冷却中
+    if player.meleeSwingTimer > 0 then return end   -- 正在挥击
+
+    player.meleeSwingTimer = player.meleeSwingDur
+    player.meleeTimer = player.meleeCooldown
+    player.meleeHitDone = false
+end
+
 function TryShoot()
     if InvUI.isOpen then return end  -- 背包打开时禁止射击
     if player.reloading then return end
@@ -1078,6 +1095,9 @@ function TryShoot()
             local reloadSpeedBonus = Inv.GetStat("reloadSpeed", 0)
             player.reloadTimer = math.max(0.3, WEAPON.reloadTime - reloadSpeedBonus)
             PlaySfx(sndReload, 0.5)
+        else
+            -- 弹药全空 → 近战攻击
+            TryMelee()
         end
         return
     end
@@ -1493,6 +1513,75 @@ function HandleUpdate(eventType, eventData)
         end
     else
         player.shield = 0
+    end
+
+    -- === 近战系统更新 ===
+    if player.meleeTimer > 0 then
+        player.meleeTimer = player.meleeTimer - dt
+    end
+    if player.meleeSwingTimer > 0 then
+        player.meleeSwingTimer = player.meleeSwingTimer - dt
+        -- 挥击过半时判定伤害(只判一次)
+        if not player.meleeHitDone and player.meleeSwingTimer <= player.meleeSwingDur * 0.5 then
+            player.meleeHitDone = true
+            local meleeDmg = WEAPON.damage
+            local meleeRange = player.meleeRange + player.radius
+            local hitAny = false
+            for _, e in ipairs(enemies) do
+                local dx = e.x - player.x
+                local dy = e.y - player.y
+                local dist = math.sqrt(dx * dx + dy * dy)
+                if dist < meleeRange + e.radius then
+                    -- 检查是否在挥击扇形范围内
+                    local angleToEnemy = math.atan(dy, dx)
+                    local angleDiff = angleToEnemy - player.angle
+                    -- 归一化到 [-pi, pi]
+                    angleDiff = math.atan(math.sin(angleDiff), math.cos(angleDiff))
+                    if math.abs(angleDiff) <= player.meleeArc * 0.5 then
+                        -- 命中: 扣血
+                        e.hp = e.hp - meleeDmg
+                        e.hitFlashTimer = 0.15
+                        hitAny = true
+                        -- 伤害数字
+                        table.insert(damageNumbers, {
+                            x = e.x, y = e.y - e.radius - 5,
+                            text = tostring(meleeDmg),
+                            life = 0.8, maxLife = 0.8,
+                            vy = -40,
+                        })
+                        -- 击退效果
+                        local pushAngle = math.atan(dy, dx)
+                        local pushForce = 150
+                        e.vx = (e.vx or 0) + math.cos(pushAngle) * pushForce
+                        e.vy = (e.vy or 0) + math.sin(pushAngle) * pushForce
+                        -- 击杀判定
+                        if e.hp <= 0 then
+                            killCount = killCount + 1
+                            score = score + 10
+                            -- 击杀粒子
+                            for k = 1, 12 do
+                                local pa = math.random() * math.pi * 2
+                                local spd = 60 + math.random() * 100
+                                table.insert(particles, {
+                                    x = e.x, y = e.y,
+                                    vx = math.cos(pa) * spd, vy = math.sin(pa) * spd,
+                                    life = 0.3 + math.random() * 0.3, maxLife = 0.6,
+                                    r = e.color[1], g = e.color[2], b = e.color[3],
+                                    size = 2 + math.random() * 2, gravity = 100, drag = 0.96,
+                                })
+                            end
+                            PlaySfx(sndKill, 0.5)
+                        else
+                            PlaySfx(sndHit, 0.4)
+                        end
+                    end
+                end
+            end
+            if not hitAny then
+                -- 挥空也播放音效
+                PlaySfx(sndHit, 0.2)
+            end
+        end
     end
 
     -- === 闪电特效更新 ===
@@ -1971,7 +2060,14 @@ function UpdateBullets(dt)
                         remove = true
                     end
 
-                    -- 伤害数字(暴击显示金色大字, 护甲显示灰色)
+                    -- 弹药回收: 击中敌人概率恢复1发弹药
+                    local recycleChance = Inv.GetStat("ammoRecycleChance", 0)
+                    if recycleChance > 0 and math.random(1, 100) <= recycleChance then
+                        player.ammo = math.min(player.ammo + 1,
+                            WEAPON.magSize + math.floor(Inv.GetStat("magSize", 0)))
+                    end
+
+                    -- 伤害数字(暴击显示红色大字, 护甲显示灰色)
                     local dmgText = (b.isCrit and "暴击 " or "") .. tostring(actualDmg)
                     table.insert(damageNumbers, {
                         x = e.x, y = e.y - e.radius - 5,
@@ -2588,6 +2684,9 @@ function RestartGame()
     player.reloadTimer = 0
     player.fireTimer = 0
     player.invincibleTimer = 0
+    player.meleeTimer = 0
+    player.meleeSwingTimer = 0
+    player.meleeHitDone = false
 
     bullets = {}
     enemies = {}
@@ -3137,6 +3236,33 @@ function DrawPlayer()
             nvgLineCap(vg, NVG_ROUND)
             nvgStroke(vg)
         end
+    end
+
+    -- 近战挥击弧线特效
+    if player.meleeSwingTimer > 0 then
+        local swingProgress = 1.0 - (player.meleeSwingTimer / player.meleeSwingDur)
+        local swingAlpha = math.floor(255 * (1.0 - swingProgress))
+        local swingRadius = player.meleeRange + player.radius
+        local halfArc = player.meleeArc * 0.5
+        -- 扇形从一侧扫到另一侧
+        local sweepOffset = (swingProgress - 0.5) * player.meleeArc * 0.6
+        local arcStart = player.angle - halfArc + sweepOffset
+        local arcEnd = player.angle + halfArc + sweepOffset
+
+        -- 挥击弧线(白色半透明)
+        nvgBeginPath(vg)
+        nvgArc(vg, px, py, swingRadius, arcStart, arcEnd, NVG_CW)
+        nvgStrokeColor(vg, nvgRGBA(255, 255, 255, swingAlpha))
+        nvgStrokeWidth(vg, 3)
+        nvgLineCap(vg, NVG_ROUND)
+        nvgStroke(vg)
+
+        -- 内弧(略小, 更亮)
+        nvgBeginPath(vg)
+        nvgArc(vg, px, py, swingRadius * 0.7, arcStart, arcEnd, NVG_CW)
+        nvgStrokeColor(vg, nvgRGBA(255, 240, 200, math.floor(swingAlpha * 0.6)))
+        nvgStrokeWidth(vg, 2)
+        nvgStroke(vg)
     end
 end
 
@@ -4169,13 +4295,16 @@ function DrawHUD(w, h)
     else
         ammoColor = nvgRGBA(255, 255, 255, 255)
     end
-    nvgFillColor(vg, ammoColor)
     local ammoText
     if player.reloading then
         ammoText = WEAPON.name .. "  换弹中..."
+    elseif player.ammo <= 0 and player.totalAmmo <= 0 then
+        ammoText = "近战模式  (点击攻击)"
+        ammoColor = nvgRGBA(255, 160, 60, 255)
     else
         ammoText = WEAPON.name .. "  " .. player.ammo .. " / " .. player.totalAmmo
     end
+    nvgFillColor(vg, ammoColor)
     local ammoYOff = player.shieldMax > 0 and (hpBarH + 12 + 6) or (hpBarH + 6)
     nvgText(vg, hpBarX, hpBarY + ammoYOff, ammoText, nil)
 

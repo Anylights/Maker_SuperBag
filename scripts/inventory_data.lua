@@ -161,6 +161,17 @@ M.ARTIFACT_TEMPLATES = {
         desc = "总弹药+20",
         icon = "belt",
     },
+    {
+        id = "a_ammo_recycle",
+        name = "回收弹头",
+        rarity = 1,
+        cells = {{0,0}}, boundW = 1, boundH = 1,
+        tags = {"Projectile"},
+        baseStats = {ammoRecycleChance = 15},
+        growthStats = {ammoRecycleChance = 5},
+        desc = "击中敌人15%概率回收1发弹药",
+        icon = "recycle",
+    },
 
     -- ========== 稀有度2(优秀): 2格 — 升级上限Lv4 ==========
     {

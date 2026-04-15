@@ -24,6 +24,8 @@ Inv.tagCounts = {}
 -- 完成的行/列(用于发光效果)
 Inv.completedRows = {}   -- {[rowIndex] = true}
 Inv.completedCols = {}   -- {[colIndex] = true}
+-- 行列完成动画 {type="row"|"col", index=N, progress=0..1, done=false}
+Inv.lineAnims = {}
 
 -- ============================================================================
 -- 初始化
@@ -42,6 +44,7 @@ function Inv.Init()
     Inv.tagCounts = {}
     Inv.completedRows = {}
     Inv.completedCols = {}
+    Inv.lineAnims = {}
 end
 
 -- ============================================================================
@@ -332,8 +335,10 @@ end
 -- 行列完成检测 & 动态等级
 -- ============================================================================
 
---- 更新完成的行和列
+--- 更新完成的行和列，新完成的行/列触发环绕动画
 function Inv.UpdateCompletedLines()
+    local oldRows = Inv.completedRows
+    local oldCols = Inv.completedCols
     Inv.completedRows = {}
     Inv.completedCols = {}
 
@@ -348,6 +353,10 @@ function Inv.UpdateCompletedLines()
         end
         if full then
             Inv.completedRows[r] = true
+            -- 新完成的行 → 触发动画
+            if not oldRows[r] then
+                table.insert(Inv.lineAnims, {type = "row", index = r, progress = 0, done = false})
+            end
         end
     end
 
@@ -362,12 +371,24 @@ function Inv.UpdateCompletedLines()
         end
         if full then
             Inv.completedCols[c] = true
+            -- 新完成的列 → 触发动画
+            if not oldCols[c] then
+                table.insert(Inv.lineAnims, {type = "col", index = c, progress = 0, done = false})
+            end
+        end
+    end
+
+    -- 清理已完成的旧动画（保留最近1秒的）
+    for i = #Inv.lineAnims, 1, -1 do
+        if Inv.lineAnims[i].done then
+            table.remove(Inv.lineAnims, i)
         end
     end
 end
 
 --- 计算某个圣物的动态等级
 --- 等级 = 1 + 该圣物在已完成行中占据的格子数 + 该圣物在已完成列中占据的格子数
+--- 上限 = 格子数 * 2
 function Inv.CalculateArtifactLevel(item)
     if not item.placed then return 1 end
 
@@ -386,7 +407,8 @@ function Inv.CalculateArtifactLevel(item)
         end
     end
 
-    return 1 + bonus
+    local maxLevel = #item.cells * 2
+    return math.min(1 + bonus, maxLevel)
 end
 
 -- ============================================================================

@@ -150,15 +150,15 @@ M.ARTIFACT_TEMPLATES = {
         icon = "belt",
     },
 
-    -- ========== 稀有度2: 双格/三格 (domino/tromino) ==========
+    -- ========== 稀有度2(优秀): 2格 — 升级上限Lv4 ==========
     {
         id = "a_fire_rounds",
         name = "燃烧弹",
         rarity = 2,
-        cells = {{0,0},{1,0}}, boundW = 2, boundH = 1,  -- 横向双格
+        cells = {{0,0},{1,0}}, boundW = 2, boundH = 1,
         tags = {"Burn", "Projectile"},
         baseStats = {damage = 5, burnDamage = 18},
-        growthStats = {damage = 2, burnDamage = 6},
+        growthStats = {damage = 3, burnDamage = 8},
         desc = "子弹附带燃烧,每秒造成18点伤害",
         icon = "fire",
     },
@@ -166,10 +166,10 @@ M.ARTIFACT_TEMPLATES = {
         id = "a_frost_rounds",
         name = "冰冻弹",
         rarity = 2,
-        cells = {{0,0},{0,1}}, boundW = 1, boundH = 2,  -- 纵向双格
+        cells = {{0,0},{0,1}}, boundW = 1, boundH = 2,
         tags = {"Frost", "Projectile"},
         baseStats = {damage = 4, slowAmount = 50},
-        growthStats = {damage = 2, slowAmount = 10},
+        growthStats = {damage = 3, slowAmount = 12},
         desc = "子弹附带减速50%",
         icon = "frost",
     },
@@ -177,10 +177,10 @@ M.ARTIFACT_TEMPLATES = {
         id = "a_shock_coil",
         name = "感电线圈",
         rarity = 2,
-        cells = {{0,0},{1,0},{0,1}}, boundW = 2, boundH = 2,  -- L形三格
+        cells = {{0,0},{1,0}}, boundW = 2, boundH = 1,
         tags = {"Shock"},
         baseStats = {shockChance = 35, shockDamage = 30},
-        growthStats = {shockChance = 8, shockDamage = 10},
+        growthStats = {shockChance = 10, shockDamage = 12},
         desc = "35%概率感电,闪电攻击全屏敌人",
         icon = "coil",
     },
@@ -188,10 +188,10 @@ M.ARTIFACT_TEMPLATES = {
         id = "a_mag_extend",
         name = "扩容弹匣",
         rarity = 2,
-        cells = {{0,0},{1,0},{2,0}}, boundW = 3, boundH = 1,  -- 横向三格
+        cells = {{0,0},{0,1}}, boundW = 1, boundH = 2,
         tags = {"Projectile"},
         baseStats = {magSize = 10, reloadSpeed = 0.3},
-        growthStats = {magSize = 4, reloadSpeed = 0.08},
+        growthStats = {magSize = 5, reloadSpeed = 0.1},
         desc = "弹匣+10, 换弹加速",
         icon = "mag",
     },
@@ -199,10 +199,10 @@ M.ARTIFACT_TEMPLATES = {
         id = "a_med_kit",
         name = "急救包",
         rarity = 2,
-        cells = {{0,0},{1,0},{1,1}}, boundW = 2, boundH = 2,  -- 反L形三格
+        cells = {{0,0},{1,0}}, boundW = 2, boundH = 1,
         tags = {"Survival"},
         baseStats = {hpRegen = 4, maxHp = 20},
-        growthStats = {hpRegen = 1, maxHp = 8},
+        growthStats = {hpRegen = 2, maxHp = 10},
         desc = "每秒回复4HP,最大生命+20",
         icon = "medkit",
     },
@@ -210,10 +210,10 @@ M.ARTIFACT_TEMPLATES = {
         id = "a_bounce_round",
         name = "弹跳弹",
         rarity = 2,
-        cells = {{0,0},{0,1}}, boundW = 1, boundH = 2,  -- 纵向双格
+        cells = {{0,0},{0,1}}, boundW = 1, boundH = 2,
         tags = {"Projectile"},
         baseStats = {bounceCount = 2, damage = 4},
-        growthStats = {bounceCount = 1, damage = 2},
+        growthStats = {bounceCount = 1, damage = 3},
         desc = "子弹撞墙反弹2次,继续追杀敌人",
         icon = "bounce",
     },
@@ -221,56 +221,56 @@ M.ARTIFACT_TEMPLATES = {
         id = "a_scope",
         name = "瞄准镜",
         rarity = 2,
-        cells = {{0,0},{1,0}}, boundW = 2, boundH = 1,  -- 横向双格
+        cells = {{0,0},{1,0}}, boundW = 2, boundH = 1,
         tags = {"Crit", "Projectile"},
         baseStats = {critChance = 8, spread = -1},
-        growthStats = {critChance = 3},
+        growthStats = {critChance = 4},
         desc = "暴击率+8%,散布减少",
         icon = "scope",
     },
 
-    -- ========== 稀有度3: 四格 (tetromino) ==========
+    -- ========== 稀有度3(稀有): 3格 — 升级上限Lv6 ==========
     {
         id = "a_explosive_rounds",
         name = "爆裂弹",
         rarity = 3,
-        cells = {{0,0},{1,0},{2,0},{3,0}}, boundW = 4, boundH = 1,  -- I形
+        cells = {{0,0},{1,0},{2,0}}, boundW = 3, boundH = 1,  -- 横三格
         tags = {"Blast", "Projectile"},
-        baseStats = {damage = 12, explosionRadius = 65, explosionDamage = 40},
-        growthStats = {damage = 5, explosionDamage = 15},
-        desc = "子弹命中后爆炸,对范围内敌人造成40伤害",
+        baseStats = {damage = 14, explosionRadius = 65, explosionDamage = 45},
+        growthStats = {damage = 6, explosionDamage = 18},
+        desc = "子弹命中后爆炸,对范围内敌人造成45伤害",
         icon = "bomb",
     },
     {
         id = "a_chain_lightning",
         name = "连锁闪电",
         rarity = 3,
-        cells = {{0,0},{1,0},{0,1},{1,1}}, boundW = 2, boundH = 2,  -- O形
+        cells = {{0,0},{1,0},{0,1}}, boundW = 2, boundH = 2,  -- L形
         tags = {"Shock", "Shock"},
-        baseStats = {chainCount = 4, chainDamage = 25},
-        growthStats = {chainDamage = 8},
-        desc = "感电弹射4个目标,每次25伤害",
+        baseStats = {chainCount = 4, chainDamage = 28},
+        growthStats = {chainDamage = 10},
+        desc = "感电弹射4个目标,每次28伤害",
         icon = "lightning",
     },
     {
         id = "a_blood_pact",
         name = "鲜血契约",
         rarity = 3,
-        cells = {{0,0},{1,0},{2,0},{1,1}}, boundW = 3, boundH = 2,  -- T形
+        cells = {{0,0},{1,0},{1,1}}, boundW = 2, boundH = 2,  -- 反L形
         tags = {"Crit", "Survival"},
-        baseStats = {critChance = 18, critDamage = 50, maxHp = -15},
-        growthStats = {critChance = 5, critDamage = 15},
-        desc = "暴击率+18%,暴伤+50%,但最大生命-15",
+        baseStats = {critChance = 20, critDamage = 55, maxHp = -15},
+        growthStats = {critChance = 6, critDamage = 18},
+        desc = "暴击率+20%,暴伤+55%,但最大生命-15",
         icon = "blood",
     },
     {
         id = "a_drone",
         name = "攻击无人机",
         rarity = 3,
-        cells = {{0,0},{1,0},{1,1},{2,1}}, boundW = 3, boundH = 2,  -- S形
+        cells = {{0,0},{0,1},{1,1}}, boundW = 2, boundH = 2,  -- 反L形
         tags = {"Companion"},
-        baseStats = {droneDamage = 18, droneRate = 0.7},
-        growthStats = {droneDamage = 6, droneRate = -0.1},
+        baseStats = {droneDamage = 20, droneRate = 0.7},
+        growthStats = {droneDamage = 8, droneRate = -0.1},
         desc = "召唤无人机自动攻击附近敌人",
         icon = "drone",
     },
@@ -278,10 +278,10 @@ M.ARTIFACT_TEMPLATES = {
         id = "a_piercing_rail",
         name = "穿甲弹",
         rarity = 3,
-        cells = {{1,0},{2,0},{0,1},{1,1}}, boundW = 3, boundH = 2,  -- Z形
+        cells = {{0,0},{0,1},{0,2}}, boundW = 1, boundH = 3,  -- 竖三格
         tags = {"Projectile", "Projectile"},
-        baseStats = {damage = 18, pierce = 3},
-        growthStats = {damage = 6},
+        baseStats = {damage = 20, pierce = 3},
+        growthStats = {damage = 8},
         desc = "子弹可穿透3个敌人",
         icon = "rail",
     },
@@ -289,10 +289,10 @@ M.ARTIFACT_TEMPLATES = {
         id = "a_shotgun_mod",
         name = "散弹模组",
         rarity = 3,
-        cells = {{0,0},{0,1},{0,2},{1,2}}, boundW = 2, boundH = 3,  -- L形
+        cells = {{0,0},{1,0},{2,0}}, boundW = 3, boundH = 1,  -- 横三格
         tags = {"Projectile", "Blast"},
-        baseStats = {shotgunPellets = 3, damage = 3},
-        growthStats = {shotgunPellets = 1, damage = 1},
+        baseStats = {shotgunPellets = 3, damage = 4},
+        growthStats = {shotgunPellets = 1, damage = 2},
         desc = "额外发射3颗散弹,火力覆盖更广",
         icon = "shotgun",
     },
@@ -300,34 +300,34 @@ M.ARTIFACT_TEMPLATES = {
         id = "a_shield_gen",
         name = "能量护盾",
         rarity = 3,
-        cells = {{1,0},{0,1},{1,1},{1,2}}, boundW = 2, boundH = 3,  -- J形
+        cells = {{0,0},{1,0},{0,1}}, boundW = 2, boundH = 2,  -- L形
         tags = {"Survival", "Survival"},
-        baseStats = {shieldMax = 40, shieldRegen = 5},
-        growthStats = {shieldMax = 15, shieldRegen = 2},
-        desc = "生成40点能量护盾,每秒恢复5点",
+        baseStats = {shieldMax = 45, shieldRegen = 6},
+        growthStats = {shieldMax = 18, shieldRegen = 3},
+        desc = "生成45点能量护盾,每秒恢复6点",
         icon = "shield_gen",
     },
     {
         id = "a_dash_unit",
         name = "冲刺模组",
         rarity = 3,
-        cells = {{0,0},{1,0},{0,1},{0,2}}, boundW = 2, boundH = 3,  -- 反L形(四格)
+        cells = {{1,0},{0,1},{1,1}}, boundW = 2, boundH = 2,  -- 反L形
         tags = {"Mobility", "Mobility"},
-        baseStats = {dashCooldown = -1.0, moveSpeed = 15},
-        growthStats = {moveSpeed = 5},
-        desc = "冲刺CD-1秒,移速+15",
+        baseStats = {dashCooldown = -1.0, moveSpeed = 18},
+        growthStats = {moveSpeed = 6},
+        desc = "冲刺CD-1秒,移速+18",
         icon = "dash",
     },
 
-    -- ========== 稀有度4: 五格 (pentomino) ==========
+    -- ========== 稀有度4(史诗): 4格 — 升级上限Lv8 ==========
     {
         id = "a_inferno_core",
         name = "炼狱核心",
         rarity = 4,
-        cells = {{0,0},{1,0},{2,0},{1,1},{1,2}}, boundW = 3, boundH = 3,  -- +形(十字)
+        cells = {{0,0},{1,0},{2,0},{1,1}}, boundW = 3, boundH = 2,  -- T形
         tags = {"Burn", "Burn", "Blast"},
-        baseStats = {burnDamage = 28, burnDuration = 1.5, explosionOnBurn = true},
-        growthStats = {burnDamage = 10},
+        baseStats = {burnDamage = 32, burnDuration = 1.5, explosionOnBurn = true},
+        growthStats = {burnDamage = 12},
         desc = "燃烧持续+1秒,燃烧结束时爆炸",
         icon = "inferno",
     },
@@ -335,10 +335,10 @@ M.ARTIFACT_TEMPLATES = {
         id = "a_frost_nova",
         name = "极寒脉冲",
         rarity = 4,
-        cells = {{0,0},{1,0},{2,0},{3,0},{4,0}}, boundW = 5, boundH = 1,  -- I形(五格长条)
+        cells = {{0,0},{1,0},{2,0},{3,0}}, boundW = 4, boundH = 1,  -- I形
         tags = {"Frost", "Frost", "Blast"},
-        baseStats = {frostNovaRadius = 80, frostNovaDamage = 45, slowAmount = 70},
-        growthStats = {frostNovaDamage = 15},
+        baseStats = {frostNovaRadius = 85, frostNovaDamage = 50, slowAmount = 75},
+        growthStats = {frostNovaDamage = 18},
         desc = "每10秒释放冰霜脉冲,冻结周围敌人",
         icon = "nova",
     },
@@ -346,34 +346,34 @@ M.ARTIFACT_TEMPLATES = {
         id = "a_turret",
         name = "自动炮台",
         rarity = 4,
-        cells = {{0,0},{1,0},{2,0},{0,1},{2,1}}, boundW = 3, boundH = 2,  -- U形
+        cells = {{0,0},{1,0},{0,1},{1,1}}, boundW = 2, boundH = 2,  -- O形
         tags = {"Companion", "Companion"},
-        baseStats = {turretDamage = 12, turretRange = 200, turretRate = 0.5},
-        growthStats = {turretDamage = 4},
+        baseStats = {turretDamage = 14, turretRange = 210, turretRate = 0.5},
+        growthStats = {turretDamage = 5},
         desc = "部署自动炮台,攻击范围内敌人",
         icon = "turret",
     },
 
-    -- ========== 稀有度5: 七格 (heptomino) ==========
+    -- ========== 稀有度5(传奇): 5格 — 升级上限Lv10 ==========
     {
         id = "a_storm_caller",
         name = "风暴召唤者",
         rarity = 5,
-        cells = {{1,0},{0,1},{1,1},{2,1},{0,2},{1,2},{2,2}}, boundW = 3, boundH = 3,  -- 大十字/钻石
+        cells = {{0,0},{1,0},{2,0},{1,1},{1,2}}, boundW = 3, boundH = 3,  -- +形(十字)
         tags = {"Shock", "Shock", "Blast", "Blast"},
-        baseStats = {stormInterval = 6, stormDamage = 80, stormRadius = 130},
-        growthStats = {stormDamage = 30},
-        desc = "每6秒召唤闪电风暴,对范围内敌人造成80伤害",
+        baseStats = {stormInterval = 6, stormDamage = 90, stormRadius = 140},
+        growthStats = {stormDamage = 35},
+        desc = "每6秒召唤闪电风暴,对范围内敌人造成90伤害",
         icon = "storm",
     },
     {
         id = "a_phoenix",
         name = "不死鸟之羽",
         rarity = 5,
-        cells = {{0,0},{2,0},{0,1},{1,1},{2,1},{0,2},{2,2}}, boundW = 3, boundH = 3,  -- H形
+        cells = {{0,0},{1,0},{2,0},{0,1},{2,1}}, boundW = 3, boundH = 2,  -- U形
         tags = {"Burn", "Survival", "Survival"},
-        baseStats = {revive = 1, burnAura = 20, maxHp = 50},
-        growthStats = {burnAura = 8, maxHp = 15},
+        baseStats = {revive = 1, burnAura = 24, maxHp = 60},
+        growthStats = {burnAura = 10, maxHp = 18},
         desc = "死亡时原地复活(1次),身边持续燃烧敌人",
         icon = "phoenix",
     },

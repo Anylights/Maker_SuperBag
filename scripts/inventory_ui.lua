@@ -260,6 +260,17 @@ function UI.Draw(nvg, logicalW, logicalH, mouseX, mouseY)
     UI.glowTimer = UI.glowTimer + 0.02
     local alpha = UI.animAlpha
 
+    -- 推进环绕扫光动画进度
+    for _, anim in ipairs(Inv.lineAnims) do
+        if not anim.done then
+            anim.progress = anim.progress + 0.025  -- ~40帧完成环绕(约0.67秒)
+            if anim.progress >= 1.0 then
+                anim.progress = 1.0
+                anim.done = true
+            end
+        end
+    end
+
     -- 计算布局
     local gridW = Inv.cols * cellSize
     local gridH = Inv.rows * cellSize
@@ -392,70 +403,166 @@ function UI.DrawGrid(nvg, alpha)
     end
 end
 
---- 绘制完成行列的金色发光效果(增强版)
+--- 绘制完成行列的边缘发光效果
+--- 1. 环绕扫光动画(填满瞬间，金光从起点沿边缘环绕一圈)
+--- 2. 静态呼吸边缘光(动画结束后，边缘保持柔和向外渐隐金光)
 function UI.DrawCompletedLineGlow(nvg, alpha)
-    local pulse = 0.5 + 0.5 * math.sin(UI.glowTimer * 4.0)
-    local fillAlpha = math.floor((0.25 + 0.2 * pulse) * 255 * alpha)
-    local borderAlpha = math.floor((0.7 + 0.3 * pulse) * 255 * alpha)
-    local outerGlowAlpha = math.floor((0.15 + 0.15 * pulse) * 255 * alpha)
+    local pulse = 0.5 + 0.5 * math.sin(UI.glowTimer * 3.0)
 
-    -- 发光行
+    -- === 环绕扫光动画(进行中的 lineAnims) ===
+    for _, anim in ipairs(Inv.lineAnims) do
+        if not anim.done then
+            local prog = anim.progress  -- 0..1 环绕进度
+            if anim.type == "row" then
+                local r = anim.index
+                local rx = gridOriginX
+                local ry = gridOriginY + (r - 1) * cellSize
+                local rw = Inv.cols * cellSize
+                local rh = cellSize
+                -- 周长: 2*(rw+rh), 沿矩形边缘画光点
+                local perimeter = 2 * (rw + rh)
+                local drawLen = prog * perimeter  -- 已画到的长度
+
+                UI.DrawSweepGlow(nvg, rx, ry, rw, rh, drawLen, perimeter, alpha)
+            else -- col
+                local c = anim.index
+                local cx = gridOriginX + (c - 1) * cellSize
+                local cy = gridOriginY
+                local cw = cellSize
+                local ch = Inv.rows * cellSize
+                local perimeter = 2 * (cw + ch)
+                local drawLen = prog * perimeter
+
+                UI.DrawSweepGlow(nvg, cx, cy, cw, ch, drawLen, perimeter, alpha)
+            end
+        end
+    end
+
+    -- === 静态呼吸边缘光(已完成的行/列) ===
+    local edgeAlpha = math.floor((0.35 + 0.25 * pulse) * 255 * alpha)
+    local glowSpread = 4 + 2 * pulse  -- 向外渐隐宽度
+
+    -- 行
     for r in pairs(Inv.completedRows) do
-        local rowX = gridOriginX
-        local rowY = gridOriginY + (r - 1) * cellSize
-
-        -- 外层光晕(扩大范围)
-        nvgBeginPath(nvg)
-        nvgRect(nvg, rowX - 3, rowY - 3, Inv.cols * cellSize + 6, cellSize + 6)
-        nvgFillColor(nvg, nvgRGBA(255, 180, 20, outerGlowAlpha))
-        nvgFill(nvg)
-
-        -- 每格填充
-        for c = 1, Inv.cols do
-            local x = gridOriginX + (c - 1) * cellSize
-            local y = rowY
-            nvgBeginPath(nvg)
-            nvgRoundedRect(nvg, x + 1, y + 1, cellSize - 2, cellSize - 2, 2)
-            nvgFillColor(nvg, nvgRGBA(255, 210, 50, fillAlpha))
-            nvgFill(nvg)
+        -- 检查是否仍在播放扫光动画
+        local animating = false
+        for _, anim in ipairs(Inv.lineAnims) do
+            if not anim.done and anim.type == "row" and anim.index == r then
+                animating = true
+                break
+            end
         end
-
-        -- 行边框高亮(加粗)
-        nvgBeginPath(nvg)
-        nvgRect(nvg, rowX, rowY, Inv.cols * cellSize, cellSize)
-        nvgStrokeColor(nvg, nvgRGBA(255, 200, 40, borderAlpha))
-        nvgStrokeWidth(nvg, 2.5)
-        nvgStroke(nvg)
+        if not animating then
+            local rx = gridOriginX
+            local ry = gridOriginY + (r - 1) * cellSize
+            local rw = Inv.cols * cellSize
+            local rh = cellSize
+            UI.DrawEdgeGlow(nvg, rx, ry, rw, rh, edgeAlpha, glowSpread)
+        end
     end
 
-    -- 发光列
+    -- 列
     for c in pairs(Inv.completedCols) do
-        local colX = gridOriginX + (c - 1) * cellSize
-        local colY = gridOriginY
+        local animating = false
+        for _, anim in ipairs(Inv.lineAnims) do
+            if not anim.done and anim.type == "col" and anim.index == c then
+                animating = true
+                break
+            end
+        end
+        if not animating then
+            local cx = gridOriginX + (c - 1) * cellSize
+            local cy = gridOriginY
+            local cw = cellSize
+            local ch = Inv.rows * cellSize
+            UI.DrawEdgeGlow(nvg, cx, cy, cw, ch, edgeAlpha, glowSpread)
+        end
+    end
+end
 
-        -- 外层光晕(扩大范围)
+--- 绘制环绕扫光: 从矩形左上角开始, 沿顺时针环绕
+--- drawLen: 已扫过的周长距离, perimeter: 总周长
+function UI.DrawSweepGlow(nvg, rx, ry, rw, rh, drawLen, perimeter, alpha)
+    -- 将 drawLen 映射到矩形边缘上的点序列
+    -- 边顺序: 上(→) → 右(↓) → 下(←) → 左(↑)
+    local edges = {
+        {rx, ry, rx + rw, ry, rw},          -- 上边
+        {rx + rw, ry, rx + rw, ry + rh, rh}, -- 右边
+        {rx + rw, ry + rh, rx, ry + rh, rw}, -- 下边
+        {rx, ry + rh, rx, ry, rh},            -- 左边
+    }
+
+    local remain = drawLen
+    -- 扫光尾迹宽度
+    local trailLen = perimeter * 0.15
+    local headAlpha = math.floor(255 * alpha)
+
+    for _, edge in ipairs(edges) do
+        local ex1, ey1, ex2, ey2, eLen = edge[1], edge[2], edge[3], edge[4], edge[5]
+        if remain <= 0 then break end
+
+        local segLen = math.min(remain, eLen)
+        local t = segLen / eLen
+        local mx = ex1 + (ex2 - ex1) * t
+        local my = ey1 + (ey2 - ey1) * t
+
+        -- 绘制已扫过的边缘段(金色发光线)
         nvgBeginPath(nvg)
-        nvgRect(nvg, colX - 3, colY - 3, cellSize + 6, Inv.rows * cellSize + 6)
-        nvgFillColor(nvg, nvgRGBA(255, 180, 20, outerGlowAlpha))
-        nvgFill(nvg)
+        nvgMoveTo(nvg, ex1, ey1)
+        nvgLineTo(nvg, mx, my)
+        nvgStrokeColor(nvg, nvgRGBA(255, 200, 40, headAlpha))
+        nvgStrokeWidth(nvg, 3)
+        nvgStroke(nvg)
 
-        -- 每格填充
-        for r = 1, Inv.rows do
-            local x = colX
-            local y = gridOriginY + (r - 1) * cellSize
+        -- 外侧光晕(柔和)
+        nvgBeginPath(nvg)
+        nvgMoveTo(nvg, ex1, ey1)
+        nvgLineTo(nvg, mx, my)
+        nvgStrokeColor(nvg, nvgRGBA(255, 180, 20, math.floor(80 * alpha)))
+        nvgStrokeWidth(nvg, 8)
+        nvgStroke(nvg)
+
+        -- 扫光头部亮点
+        if remain <= eLen then
+            -- 头部在此边上
             nvgBeginPath(nvg)
-            nvgRoundedRect(nvg, x + 1, y + 1, cellSize - 2, cellSize - 2, 2)
-            nvgFillColor(nvg, nvgRGBA(255, 210, 50, fillAlpha))
+            nvgCircle(nvg, mx, my, 5)
+            nvgFillColor(nvg, nvgRGBA(255, 240, 120, headAlpha))
+            nvgFill(nvg)
+
+            -- 头部外晕
+            nvgBeginPath(nvg)
+            nvgCircle(nvg, mx, my, 10)
+            nvgFillColor(nvg, nvgRGBA(255, 200, 40, math.floor(40 * alpha)))
             nvgFill(nvg)
         end
 
-        -- 列边框高亮(加粗)
+        remain = remain - eLen
+    end
+end
+
+--- 绘制静态边缘呼吸光(向外渐隐, 不填充内部)
+function UI.DrawEdgeGlow(nvg, rx, ry, rw, rh, edgeAlpha, spread)
+    -- 四条边的外侧渐变光带(用多层细线模拟渐隐)
+    local layers = 4
+    for i = 1, layers do
+        local offset = i * (spread / layers)
+        local layerAlpha = math.floor(edgeAlpha * (1 - i / (layers + 1)))
+        if layerAlpha < 1 then break end
+
         nvgBeginPath(nvg)
-        nvgRect(nvg, colX, colY, cellSize, Inv.rows * cellSize)
-        nvgStrokeColor(nvg, nvgRGBA(255, 200, 40, borderAlpha))
-        nvgStrokeWidth(nvg, 2.5)
+        nvgRect(nvg, rx - offset, ry - offset, rw + offset * 2, rh + offset * 2)
+        nvgStrokeColor(nvg, nvgRGBA(255, 200, 40, layerAlpha))
+        nvgStrokeWidth(nvg, spread / layers)
         nvgStroke(nvg)
     end
+
+    -- 最内层亮边
+    nvgBeginPath(nvg)
+    nvgRect(nvg, rx, ry, rw, rh)
+    nvgStrokeColor(nvg, nvgRGBA(255, 210, 50, edgeAlpha))
+    nvgStrokeWidth(nvg, 1.5)
+    nvgStroke(nvg)
 end
 
 function UI.DrawPlacedItems(nvg, alpha)
@@ -469,68 +576,85 @@ function UI.DrawPlacedItems(nvg, alpha)
     end
 end
 
---- 绘制一个cell-based物品(俄罗斯方块形状)
+--- 绘制一个cell-based物品(一体化渲染，无内部黑线)
 function UI.DrawItemCells(nvg, item, baseCol, baseRow, alpha)
     local cells = Inv.GetItemCells(item)
     local rarityCol = Data.RARITY_COLORS[item.rarity] or {200, 200, 200}
     local bgCol = Data.RARITY_BG_COLORS[item.rarity] or {40, 40, 40}
+    local inset = 3  -- 外边缘内缩像素
 
-    -- 建立cellSet用于边缘检测(连接边框)
+    -- 建立cellSet用于邻居检测
     local cellSet = {}
     for _, cell in ipairs(cells) do
-        local key = cell[1] .. "," .. cell[2]
-        cellSet[key] = true
+        cellSet[cell[1] .. "," .. cell[2]] = true
     end
 
-    -- 绘制每个格子
+    -- 1. 填充: 每格根据邻居动态计算边界(有邻居方向不内缩→融合)
     for _, cell in ipairs(cells) do
         local c = baseCol + cell[1]
         local r = baseRow + cell[2]
         local x = gridOriginX + (c - 1) * cellSize
         local y = gridOriginY + (r - 1) * cellSize
+        local dc, dr = cell[1], cell[2]
 
-        -- 格子背景
+        local x0 = cellSet[(dc - 1) .. "," .. dr] and x or (x + inset)
+        local y0 = cellSet[dc .. "," .. (dr - 1)] and y or (y + inset)
+        local x1 = cellSet[(dc + 1) .. "," .. dr] and (x + cellSize) or (x + cellSize - inset)
+        local y1 = cellSet[dc .. "," .. (dr + 1)] and (y + cellSize) or (y + cellSize - inset)
+
         nvgBeginPath(nvg)
-        nvgRoundedRect(nvg, x + 1.5, y + 1.5, cellSize - 3, cellSize - 3, 2)
+        nvgRect(nvg, x0, y0, x1 - x0, y1 - y0)
         nvgFillColor(nvg, nvgRGBA(bgCol[1] + 25, bgCol[2] + 25, bgCol[3] + 25, math.floor(220 * alpha)))
         nvgFill(nvg)
+    end
 
-        -- 外边缘描边(只画不与同物品格子相邻的边)
+    -- 2. 外轮廓描边(只画不与同物品格子相邻的边)
+    nvgStrokeWidth(nvg, 1.5)
+    nvgStrokeColor(nvg, nvgRGBA(rarityCol[1], rarityCol[2], rarityCol[3], math.floor(200 * alpha)))
+
+    for _, cell in ipairs(cells) do
+        local c = baseCol + cell[1]
+        local r = baseRow + cell[2]
+        local x = gridOriginX + (c - 1) * cellSize
+        local y = gridOriginY + (r - 1) * cellSize
         local dc, dr = cell[1], cell[2]
-        nvgStrokeWidth(nvg, 1.5)
-        nvgStrokeColor(nvg, nvgRGBA(rarityCol[1], rarityCol[2], rarityCol[3], math.floor(200 * alpha)))
+
+        local lx = cellSet[(dc - 1) .. "," .. dr] and x or (x + inset)
+        local ty = cellSet[dc .. "," .. (dr - 1)] and y or (y + inset)
+        local rx = cellSet[(dc + 1) .. "," .. dr] and (x + cellSize) or (x + cellSize - inset)
+        local by = cellSet[dc .. "," .. (dr + 1)] and (y + cellSize) or (y + cellSize - inset)
 
         -- 上边
-        if not cellSet[(dc) .. "," .. (dr - 1)] then
+        if not cellSet[dc .. "," .. (dr - 1)] then
             nvgBeginPath(nvg)
-            nvgMoveTo(nvg, x + 1, y + 1)
-            nvgLineTo(nvg, x + cellSize - 1, y + 1)
+            nvgMoveTo(nvg, lx, ty)
+            nvgLineTo(nvg, rx, ty)
             nvgStroke(nvg)
         end
         -- 下边
-        if not cellSet[(dc) .. "," .. (dr + 1)] then
+        if not cellSet[dc .. "," .. (dr + 1)] then
             nvgBeginPath(nvg)
-            nvgMoveTo(nvg, x + 1, y + cellSize - 1)
-            nvgLineTo(nvg, x + cellSize - 1, y + cellSize - 1)
+            nvgMoveTo(nvg, lx, by)
+            nvgLineTo(nvg, rx, by)
             nvgStroke(nvg)
         end
         -- 左边
-        if not cellSet[(dc - 1) .. "," .. (dr)] then
+        if not cellSet[(dc - 1) .. "," .. dr] then
             nvgBeginPath(nvg)
-            nvgMoveTo(nvg, x + 1, y + 1)
-            nvgLineTo(nvg, x + 1, y + cellSize - 1)
+            nvgMoveTo(nvg, lx, ty)
+            nvgLineTo(nvg, lx, by)
             nvgStroke(nvg)
         end
         -- 右边
-        if not cellSet[(dc + 1) .. "," .. (dr)] then
+        if not cellSet[(dc + 1) .. "," .. dr] then
             nvgBeginPath(nvg)
-            nvgMoveTo(nvg, x + cellSize - 1, y + 1)
-            nvgLineTo(nvg, x + cellSize - 1, y + cellSize - 1)
+            nvgMoveTo(nvg, rx, ty)
+            nvgLineTo(nvg, rx, by)
             nvgStroke(nvg)
         end
     end
 
-    -- 计算形状的包围盒(像素坐标)
+    -- 3. 文字标签
     local minC, maxC, minR, maxR = 9999, -9999, 9999, -9999
     for _, cell in ipairs(cells) do
         local c = baseCol + cell[1]
@@ -542,35 +666,27 @@ function UI.DrawItemCells(nvg, item, baseCol, baseRow, alpha)
     end
     local centerX = gridOriginX + ((minC - 1) + (maxC)) * cellSize / 2
     local centerY = gridOriginY + ((minR - 1) + (maxR)) * cellSize / 2
-    local spanW = maxC - minC + 1  -- 形状宽度(格数)
-    local spanH = maxR - minR + 1  -- 形状高度(格数)
+    local spanW = maxC - minC + 1
     local numCells = #cells
 
     nvgFontFace(nvg, "sans")
     nvgTextAlign(nvg, NVG_ALIGN_CENTER + NVG_ALIGN_MIDDLE)
 
-    -- 根据形状大小选择文字显示策略
     if numCells == 1 then
-        -- 单格: 只显示首字缩写, 无等级
         nvgFontSize(nvg, 8)
         nvgFillColor(nvg, nvgRGBA(rarityCol[1], rarityCol[2], rarityCol[3], math.floor(230 * alpha)))
-        local abbr = string.sub(item.name, 1, 3) -- 取第一个汉字(UTF-8 3字节)
+        local abbr = string.sub(item.name, 1, 3)
         nvgText(nvg, centerX, centerY, abbr, nil)
     elseif numCells <= 3 then
-        -- 2-3格: 显示短名, 等级用小角标
         local displayName = item.name
-        -- UTF-8下每个汉字3字节, 限制到2个汉字
-        if #displayName > 6 then
-            displayName = string.sub(displayName, 1, 6)
-        end
+        if #displayName > 6 then displayName = string.sub(displayName, 1, 6) end
         nvgFontSize(nvg, 8)
         nvgFillColor(nvg, nvgRGBA(rarityCol[1], rarityCol[2], rarityCol[3], math.floor(240 * alpha)))
         nvgText(nvg, centerX, centerY, displayName, nil)
 
-        -- 等级: 显示在右上角第一个格子
         if item.level and item.level > 1 then
-            local topRightX = gridOriginX + maxC * cellSize - 3
-            local topRightY = gridOriginY + (minR - 1) * cellSize + 6
+            local topRightX = gridOriginX + maxC * cellSize - inset - 1
+            local topRightY = gridOriginY + (minR - 1) * cellSize + inset + 1
             nvgFontSize(nvg, 7)
             nvgTextAlign(nvg, NVG_ALIGN_RIGHT + NVG_ALIGN_TOP)
             nvgFillColor(nvg, nvgRGBA(255, 220, 80, math.floor(230 * alpha)))
@@ -578,14 +694,10 @@ function UI.DrawItemCells(nvg, item, baseCol, baseRow, alpha)
             nvgTextAlign(nvg, NVG_ALIGN_CENTER + NVG_ALIGN_MIDDLE)
         end
     else
-        -- 4+格: 足够空间, 显示名称和等级分行
         local displayName = item.name
-        -- 限制名称长度: 宽形状可以长一些
-        local maxChars = math.min(4, spanW + 1) -- 宽度决定可显示字数
+        local maxChars = math.min(4, spanW + 1)
         local maxBytes = maxChars * 3
-        if #displayName > maxBytes then
-            displayName = string.sub(displayName, 1, maxBytes)
-        end
+        if #displayName > maxBytes then displayName = string.sub(displayName, 1, maxBytes) end
 
         local hasLevel = item.level and item.level > 1
         local nameY = hasLevel and (centerY - 5) or centerY
@@ -600,10 +712,10 @@ function UI.DrawItemCells(nvg, item, baseCol, baseRow, alpha)
         end
     end
 
-    -- 标签小圆点(左下角格子)
+    -- 标签小圆点(左下角)
     if item.tags then
-        local dotX = gridOriginX + (minC - 1) * cellSize + 5
-        local dotY = gridOriginY + maxR * cellSize - 4
+        local dotX = gridOriginX + (minC - 1) * cellSize + inset + 3
+        local dotY = gridOriginY + maxR * cellSize - inset - 2
         for ti = 1, math.min(3, #item.tags) do
             local tagCol = Data.TAG_COLORS[item.tags[ti]] or {180, 180, 180}
             nvgBeginPath(nvg)
@@ -666,19 +778,59 @@ function UI.DrawDragPreview(nvg, mouseX, mouseY, alpha)
         nvgGlobalAlpha(nvg, 0.75)
     end
 
-    -- 绘制拖拽中的cell-based物品
+    -- 绘制拖拽中的cell-based物品(一体化渲染)
     local rarityCol = Data.RARITY_COLORS[item.rarity] or {200, 200, 200}
     local bgCol = Data.RARITY_BG_COLORS[item.rarity] or {40, 40, 40}
+    local dinset = 3
+
+    -- 建立cellSet用于邻居检测
+    local dragCellSet = {}
+    for _, cell in ipairs(cells) do
+        dragCellSet[cell[1] .. "," .. cell[2]] = true
+    end
+
+    -- 填充
     for _, cell in ipairs(cells) do
         local cx = drawX + cell[1] * cellSize
         local cy = drawY + cell[2] * cellSize
+        local dc, dr = cell[1], cell[2]
+
+        local x0 = dragCellSet[(dc - 1) .. "," .. dr] and cx or (cx + dinset)
+        local y0 = dragCellSet[dc .. "," .. (dr - 1)] and cy or (cy + dinset)
+        local x1 = dragCellSet[(dc + 1) .. "," .. dr] and (cx + cellSize) or (cx + cellSize - dinset)
+        local y1 = dragCellSet[dc .. "," .. (dr + 1)] and (cy + cellSize) or (cy + cellSize - dinset)
+
         nvgBeginPath(nvg)
-        nvgRoundedRect(nvg, cx + 1, cy + 1, cellSize - 2, cellSize - 2, 2)
+        nvgRect(nvg, x0, y0, x1 - x0, y1 - y0)
         nvgFillColor(nvg, nvgRGBA(bgCol[1] + 25, bgCol[2] + 25, bgCol[3] + 25, math.floor(220 * alpha)))
         nvgFill(nvg)
-        nvgStrokeColor(nvg, nvgRGBA(rarityCol[1], rarityCol[2], rarityCol[3], math.floor(200 * alpha)))
-        nvgStrokeWidth(nvg, 1.5)
-        nvgStroke(nvg)
+    end
+
+    -- 外轮廓描边
+    nvgStrokeWidth(nvg, 1.5)
+    nvgStrokeColor(nvg, nvgRGBA(rarityCol[1], rarityCol[2], rarityCol[3], math.floor(200 * alpha)))
+    for _, cell in ipairs(cells) do
+        local cx = drawX + cell[1] * cellSize
+        local cy = drawY + cell[2] * cellSize
+        local dc, dr = cell[1], cell[2]
+
+        local lx = dragCellSet[(dc - 1) .. "," .. dr] and cx or (cx + dinset)
+        local ty = dragCellSet[dc .. "," .. (dr - 1)] and cy or (cy + dinset)
+        local rx = dragCellSet[(dc + 1) .. "," .. dr] and (cx + cellSize) or (cx + cellSize - dinset)
+        local by = dragCellSet[dc .. "," .. (dr + 1)] and (cy + cellSize) or (cy + cellSize - dinset)
+
+        if not dragCellSet[dc .. "," .. (dr - 1)] then
+            nvgBeginPath(nvg); nvgMoveTo(nvg, lx, ty); nvgLineTo(nvg, rx, ty); nvgStroke(nvg)
+        end
+        if not dragCellSet[dc .. "," .. (dr + 1)] then
+            nvgBeginPath(nvg); nvgMoveTo(nvg, lx, by); nvgLineTo(nvg, rx, by); nvgStroke(nvg)
+        end
+        if not dragCellSet[(dc - 1) .. "," .. dr] then
+            nvgBeginPath(nvg); nvgMoveTo(nvg, lx, ty); nvgLineTo(nvg, lx, by); nvgStroke(nvg)
+        end
+        if not dragCellSet[(dc + 1) .. "," .. dr] then
+            nvgBeginPath(nvg); nvgMoveTo(nvg, rx, ty); nvgLineTo(nvg, rx, by); nvgStroke(nvg)
+        end
     end
 
     -- 拖拽物品名称
@@ -895,20 +1047,59 @@ function UI.DrawPickupItems(nvg, alpha)
         nvgStrokeWidth(nvg, 1)
         nvgStroke(nvg)
 
-        -- 绘制cell-based物品(简化: 小预览)
+        -- 绘制cell-based物品(一体化渲染)
         local cells = Inv.GetItemCells(item)
         local rarityCol = Data.RARITY_COLORS[item.rarity] or {200, 200, 200}
         local bgCol = Data.RARITY_BG_COLORS[item.rarity] or {40, 40, 40}
+        local pinset = 3
+
+        local pickCellSet = {}
+        for _, cell in ipairs(cells) do
+            pickCellSet[cell[1] .. "," .. cell[2]] = true
+        end
+
+        -- 填充
         for _, cell in ipairs(cells) do
             local cx = x + cell[1] * cellSize
             local cy = y + cell[2] * cellSize
+            local dc, dr = cell[1], cell[2]
+
+            local x0 = pickCellSet[(dc - 1) .. "," .. dr] and cx or (cx + pinset)
+            local y0 = pickCellSet[dc .. "," .. (dr - 1)] and cy or (cy + pinset)
+            local x1 = pickCellSet[(dc + 1) .. "," .. dr] and (cx + cellSize) or (cx + cellSize - pinset)
+            local y1 = pickCellSet[dc .. "," .. (dr + 1)] and (cy + cellSize) or (cy + cellSize - pinset)
+
             nvgBeginPath(nvg)
-            nvgRoundedRect(nvg, cx + 1, cy + 1, cellSize - 2, cellSize - 2, 2)
+            nvgRect(nvg, x0, y0, x1 - x0, y1 - y0)
             nvgFillColor(nvg, nvgRGBA(bgCol[1] + 25, bgCol[2] + 25, bgCol[3] + 25, math.floor(220 * alpha)))
             nvgFill(nvg)
-            nvgStrokeColor(nvg, nvgRGBA(rarityCol[1], rarityCol[2], rarityCol[3], math.floor(180 * alpha)))
-            nvgStrokeWidth(nvg, 1)
-            nvgStroke(nvg)
+        end
+
+        -- 外轮廓描边
+        nvgStrokeWidth(nvg, 1)
+        nvgStrokeColor(nvg, nvgRGBA(rarityCol[1], rarityCol[2], rarityCol[3], math.floor(180 * alpha)))
+        for _, cell in ipairs(cells) do
+            local cx = x + cell[1] * cellSize
+            local cy = y + cell[2] * cellSize
+            local dc, dr = cell[1], cell[2]
+
+            local lx = pickCellSet[(dc - 1) .. "," .. dr] and cx or (cx + pinset)
+            local ty = pickCellSet[dc .. "," .. (dr - 1)] and cy or (cy + pinset)
+            local rx = pickCellSet[(dc + 1) .. "," .. dr] and (cx + cellSize) or (cx + cellSize - pinset)
+            local by = pickCellSet[dc .. "," .. (dr + 1)] and (cy + cellSize) or (cy + cellSize - pinset)
+
+            if not pickCellSet[dc .. "," .. (dr - 1)] then
+                nvgBeginPath(nvg); nvgMoveTo(nvg, lx, ty); nvgLineTo(nvg, rx, ty); nvgStroke(nvg)
+            end
+            if not pickCellSet[dc .. "," .. (dr + 1)] then
+                nvgBeginPath(nvg); nvgMoveTo(nvg, lx, by); nvgLineTo(nvg, rx, by); nvgStroke(nvg)
+            end
+            if not pickCellSet[(dc - 1) .. "," .. dr] then
+                nvgBeginPath(nvg); nvgMoveTo(nvg, lx, ty); nvgLineTo(nvg, lx, by); nvgStroke(nvg)
+            end
+            if not pickCellSet[(dc + 1) .. "," .. dr] then
+                nvgBeginPath(nvg); nvgMoveTo(nvg, rx, ty); nvgLineTo(nvg, rx, by); nvgStroke(nvg)
+            end
         end
 
         -- 名称

@@ -26,8 +26,74 @@ local MAP_H = MAP_ROWS * TILE_SIZE
 -- 瓦片类型
 local TILE_FLOOR = 0
 local TILE_WALL = 1
-local TILE_CRATE = 2         -- 可搜刮箱子
+local TILE_CRATE_WOOD = 2     -- 木箱子(普通)
 local TILE_EXIT = 3           -- 撤离点
+local TILE_CRATE_IRON = 4     -- 铁箱子(精良)
+local TILE_CRATE_GOLD = 5     -- 金箱子(传说)
+
+-- 箱子辅助函数
+local function IsCrateTile(tile)
+    return tile == TILE_CRATE_WOOD or tile == TILE_CRATE_IRON or tile == TILE_CRATE_GOLD
+end
+
+-- 箱子配置表: searchTime, loot分布, 圣物最高稀有度
+local CRATE_CONFIG = {
+    [TILE_CRATE_WOOD] = {
+        name = "木箱",
+        searchTime = 1.0,
+        ammoChance   = 50,   -- 1-50: 弹药
+        healthChance = 85,   -- 51-85: 血包
+        -- 86-100: 圣物(15%)
+        maxRarity = 2,       -- 最高绿色
+        ammoRange = {5, 12},
+        healthRange = {15, 30},
+    },
+    [TILE_CRATE_IRON] = {
+        name = "铁箱",
+        searchTime = 2.0,
+        ammoChance   = 30,   -- 1-30: 弹药
+        healthChance = 55,   -- 31-55: 血包
+        -- 56-100: 圣物(45%)
+        maxRarity = 3,       -- 最高蓝色
+        ammoRange = {8, 18},
+        healthRange = {25, 45},
+    },
+    [TILE_CRATE_GOLD] = {
+        name = "金箱",
+        searchTime = 3.5,
+        ammoChance   = 15,   -- 1-15: 弹药
+        healthChance = 30,   -- 16-30: 血包
+        -- 31-100: 圣物(70%)
+        maxRarity = 5,       -- 最高橙色
+        ammoRange = {12, 25},
+        healthRange = {35, 60},
+    },
+}
+
+-- 箱子生成权重(按波次递进)
+local function GetCrateSpawnWeights(wave)
+    -- 后期波次提升高阶箱子概率
+    if wave >= 7 then
+        return { {TILE_CRATE_WOOD, 40}, {TILE_CRATE_IRON, 40}, {TILE_CRATE_GOLD, 20} }
+    elseif wave >= 4 then
+        return { {TILE_CRATE_WOOD, 50}, {TILE_CRATE_IRON, 35}, {TILE_CRATE_GOLD, 15} }
+    else
+        return { {TILE_CRATE_WOOD, 60}, {TILE_CRATE_IRON, 30}, {TILE_CRATE_GOLD, 10} }
+    end
+end
+
+local function PickWeightedCrate(wave)
+    local weights = GetCrateSpawnWeights(wave)
+    local total = 0
+    for _, w in ipairs(weights) do total = total + w[2] end
+    local roll = math.random(1, total)
+    local acc = 0
+    for _, w in ipairs(weights) do
+        acc = acc + w[2]
+        if roll <= acc then return w[1] end
+    end
+    return TILE_CRATE_WOOD
+end
 
 -- 游戏状态
 local STATE_PLAYING = "playing"
@@ -173,8 +239,7 @@ local mapData = {}           -- mapData[row][col] = tileType
 local mapRooms = {}          -- 房间列表(GenerateMap保存, 供SpawnExit使用)
 
 -- 搜刮状态
-local searchingCrate = nil   -- 正在搜刮的箱子 {col,row,timer}
-local SEARCH_TIME = 1.5
+local searchingCrate = nil   -- 正在搜刮的箱子 {col,row,timer,crateType,searchTime}
 
 -- (撤离系统已移除, 改用波次通关)
 
@@ -307,6 +372,12 @@ function Start()
     imgCrateTiles = {
         nvgCreateImage(vg, "image/tiles32/crate_0.png", 0),
         nvgCreateImage(vg, "image/tiles32/crate_1.png", 0),
+    }
+    -- 三种稀有度箱子图片
+    imgCrateByType = {
+        [TILE_CRATE_WOOD] = nvgCreateImage(vg, "image/crate_wood.png", 0),
+        [TILE_CRATE_IRON] = nvgCreateImage(vg, "image/crate_iron.png", 0),
+        [TILE_CRATE_GOLD] = nvgCreateImage(vg, "image/crate_gold.png", 0),
     }
 
     print("Player image: " .. tostring(imgPlayer))
@@ -483,7 +554,7 @@ function GenerateMap()
         end
     end
 
-    -- 在随机房间放置箱子
+    -- 在随机房间放置箱子(按波次权重选择稀有度)
     local crateCount = 0
     for _, room in ipairs(rooms) do
         local numCrates = math.random(1, 3)
@@ -491,7 +562,8 @@ function GenerateMap()
             local cx = math.random(room.x + 1, room.x + room.w - 2)
             local cy = math.random(room.y + 1, room.y + room.h - 2)
             if mapData[cy][cx] == TILE_FLOOR then
-                mapData[cy][cx] = TILE_CRATE
+                local crateType = PickWeightedCrate(WM.currentWave or 1)
+                mapData[cy][cx] = crateType
                 crateCount = crateCount + 1
             end
         end
@@ -554,7 +626,7 @@ function SpawnExit()
             local rr = centerR + dr
             local cc = centerC + dc
             if rr >= 1 and rr <= MAP_ROWS and cc >= 1 and cc <= MAP_COLS then
-                if mapData[rr][cc] == TILE_FLOOR or mapData[rr][cc] == TILE_CRATE then
+                if mapData[rr][cc] == TILE_FLOOR or IsCrateTile(mapData[rr][cc]) then
                     mapData[rr][cc] = TILE_EXIT
                 end
             end
@@ -823,8 +895,8 @@ function HandleMouseDown(eventType, eventData)
     end
 
     if button == MOUSEB_LEFT then
-        -- 出口/走出阶段禁止射击
-        if WM.phase ~= WM.PHASE_EXIT_OPEN and WM.phase ~= WM.PHASE_WALKOUT then
+        -- 走出阶段禁止射击, 出口开放阶段仍允许
+        if WM.phase ~= WM.PHASE_WALKOUT then
             TryShoot()
         end
     end
@@ -1173,20 +1245,28 @@ function HandleUpdate(eventType, eventData)
         return
     end
 
-    -- 出口开放阶段: 允许玩家移动, 检测到达出口
+    -- 出口开放阶段: 允许玩家移动、射击、搜刮, 检测到达出口
     if WM.phase == WM.PHASE_EXIT_OPEN then
         -- 首次进入: 生成出口
         if not WM.exitReady then
             SpawnExit()
         end
 
-        -- 玩家仍可移动和拾取
+        -- 玩家仍可移动、射击和搜刮
         UpdatePlayer(dt)
+        UpdateBullets(dt)   -- 子弹继续飞行
+        UpdateSearch(dt)    -- 允许搜刮箱子
         UpdateParticles(dt)
         UpdateDamageNumbers(dt)
         UpdateCamera()
 
+        -- 持续射击(按住左键, 背包打开时禁止)
+        if input:GetMouseButtonDown(MOUSEB_LEFT) and player.alive and not InvUI.isOpen then
+            TryShoot()
+        end
+
         -- 拾取掉落物(弹药/血包自动拾取, 圣物需按F)
+        -- 注: UpdateSearch 内部已处理拾取, 这里处理出口阶段残留掉落物
         for i = #lootItems, 1, -1 do
             local item = lootItems[i]
             if item.type == "artifact" then
@@ -2348,21 +2428,48 @@ function UpdateSearch(dt)
             local cx = (searchingCrate.col - 0.5) * TILE_SIZE
             local cy = (searchingCrate.row - 0.5) * TILE_SIZE
             mapData[searchingCrate.row][searchingCrate.col] = TILE_FLOOR
-            -- 随机掉落
+
+            -- 根据箱子类型决定掉落
+            local cfg = CRATE_CONFIG[searchingCrate.crateType] or CRATE_CONFIG[TILE_CRATE_WOOD]
             local roll = math.random(1, 100)
-            if roll <= 50 then
-                table.insert(lootItems, {x = cx, y = cy, type = "ammo", amount = math.random(5, 15)})
+            if roll <= cfg.ammoChance then
+                table.insert(lootItems, {x = cx, y = cy, type = "ammo",
+                    amount = math.random(cfg.ammoRange[1], cfg.ammoRange[2])})
+            elseif roll <= cfg.healthChance then
+                table.insert(lootItems, {x = cx, y = cy, type = "health",
+                    amount = math.random(cfg.healthRange[1], cfg.healthRange[2])})
             else
-                table.insert(lootItems, {x = cx, y = cy, type = "health", amount = math.random(20, 40)})
+                -- 掉落圣物
+                local lootBonusPct = Inv.GetStat("lootBonus", 0)
+                local maxRarity = cfg.maxRarity
+                -- 背包加成可能提升1级最大稀有度
+                if lootBonusPct >= 30 then
+                    maxRarity = math.min(5, maxRarity + 1)
+                end
+                local artifact = Inv.CreateRandomArtifact(maxRarity)
+                if artifact then
+                    table.insert(lootItems, {
+                        x = cx + math.random(-6, 6),
+                        y = cy + math.random(-6, 6),
+                        type = "artifact",
+                        itemData = artifact,
+                    })
+                end
             end
-            score = score + 20
+
+            -- 得分根据箱子稀有度递增
+            local scoreMap = {[TILE_CRATE_WOOD] = 20, [TILE_CRATE_IRON] = 40, [TILE_CRATE_GOLD] = 80}
+            score = score + (scoreMap[searchingCrate.crateType] or 20)
             searchingCrate = nil
         end
     else
         -- 检测玩家是否站在箱子格子上
         if player.alive and pc >= 1 and pc <= MAP_COLS and pr >= 1 and pr <= MAP_ROWS then
-            if mapData[pr][pc] == TILE_CRATE then
-                searchingCrate = {col = pc, row = pr, timer = SEARCH_TIME}
+            local tile = mapData[pr][pc]
+            if IsCrateTile(tile) then
+                local cfg = CRATE_CONFIG[tile] or CRATE_CONFIG[TILE_CRATE_WOOD]
+                searchingCrate = {col = pc, row = pr, timer = cfg.searchTime,
+                    crateType = tile, searchTime = cfg.searchTime}
             end
         end
     end
@@ -2796,7 +2903,7 @@ function DrawMap(viewW, viewH)
                 for _, d in ipairs(dirs4) do
                     local nr, nc = r + d[1], c + d[2]
                     if nr >= 1 and nr <= MAP_ROWS and nc >= 1 and nc <= MAP_COLS then
-                        if mapData[nr][nc] == TILE_FLOOR or mapData[nr][nc] == TILE_CRATE or mapData[nr][nc] == TILE_EXIT then
+                        if mapData[nr][nc] == TILE_FLOOR or IsCrateTile(mapData[nr][nc]) or mapData[nr][nc] == TILE_EXIT then
                             adjacentFloor = true
                             break
                         end
@@ -2812,7 +2919,7 @@ function DrawMap(viewW, viewH)
                         for dc = -1, 1 do
                             local nr, nc = r + dr, c + dc
                             if nr >= 1 and nr <= MAP_ROWS and nc >= 1 and nc <= MAP_COLS then
-                                if mapData[nr][nc] == TILE_FLOOR or mapData[nr][nc] == TILE_CRATE or mapData[nr][nc] == TILE_EXIT then
+                                if mapData[nr][nc] == TILE_FLOOR or IsCrateTile(mapData[nr][nc]) or mapData[nr][nc] == TILE_EXIT then
                                     nearFloor = true
                                 end
                             end
@@ -2830,12 +2937,14 @@ function DrawMap(viewW, viewH)
                 -- 地板: 用棕黄色土路瓦片, 交替使用不同变体
                 local hash = ((r * 7 + c * 13) % 4) + 1
                 DrawTileImage(imgFloorTiles[hash], x, y)
-            elseif tile == TILE_CRATE then
-                -- 箱子: 先画地板底色, 再画箱子瓦片
+            elseif IsCrateTile(tile) then
+                -- 箱子: 先画地板底色, 再画对应稀有度的箱子图片
                 local hash = ((r * 7 + c * 13) % 4) + 1
                 DrawTileImage(imgFloorTiles[hash], x, y)
-                local crateHash = ((r * 3 + c * 11) % #imgCrateTiles) + 1
-                DrawTileImage(imgCrateTiles[crateHash], x, y)
+                local crateImg = imgCrateByType[tile]
+                if crateImg then
+                    DrawTileImage(crateImg, x, y)
+                end
             elseif tile == TILE_EXIT then
                 -- 撤离点: 先画地板, 再叠加闪烁绿色半透明层
                 local hash = ((r * 7 + c * 13) % 4) + 1
@@ -3495,7 +3604,16 @@ function DrawSearchProgress()
 
     local cx = (searchingCrate.col - 0.5) * TILE_SIZE
     local cy = (searchingCrate.row - 0.5) * TILE_SIZE
-    local progress = 1.0 - (searchingCrate.timer / SEARCH_TIME)
+    local sTime = searchingCrate.searchTime or 1.0
+    local progress = 1.0 - (searchingCrate.timer / sTime)
+
+    -- 根据箱子类型选择进度条颜色
+    local barR, barG, barB = 255, 200, 60  -- 木箱:金黄
+    if searchingCrate.crateType == TILE_CRATE_IRON then
+        barR, barG, barB = 160, 200, 240   -- 铁箱:银蓝
+    elseif searchingCrate.crateType == TILE_CRATE_GOLD then
+        barR, barG, barB = 255, 180, 40    -- 金箱:橙金
+    end
 
     -- 进度条背景
     local barW = 40
@@ -3508,14 +3626,14 @@ function DrawSearchProgress()
     -- 进度条
     nvgBeginPath(vg)
     nvgRoundedRect(vg, cx - barW/2, cy - 20, barW * progress, barH, 2)
-    nvgFillColor(vg, nvgRGBA(255, 200, 60, 255))
+    nvgFillColor(vg, nvgRGBA(barR, barG, barB, 255))
     nvgFill(vg)
 
     -- 环形进度(箱子中心)
     local radius = TILE_SIZE * 0.35
     nvgBeginPath(vg)
     nvgArc(vg, cx, cy, radius, -math.pi * 0.5, -math.pi * 0.5 + math.pi * 2 * progress, NVG_CW)
-    nvgStrokeColor(vg, nvgRGBA(255, 220, 60, 200))
+    nvgStrokeColor(vg, nvgRGBA(barR, barG, barB, 200))
     nvgStrokeWidth(vg, 2.5)
     nvgStroke(vg)
 end
@@ -4089,8 +4207,12 @@ function DrawMinimap(sw, sh)
                 nvgBeginPath(vg)
                 nvgRect(vg, tx, ty, tw, tw)
 
-                if tile == TILE_CRATE then
+                if tile == TILE_CRATE_WOOD then
                     nvgFillColor(vg, nvgRGBA(180, 140, 60, 200))
+                elseif tile == TILE_CRATE_IRON then
+                    nvgFillColor(vg, nvgRGBA(160, 190, 220, 200))
+                elseif tile == TILE_CRATE_GOLD then
+                    nvgFillColor(vg, nvgRGBA(255, 200, 50, 200))
                 elseif tile == TILE_EXIT then
                     nvgFillColor(vg, nvgRGBA(80, 255, 80, 200))
                 else

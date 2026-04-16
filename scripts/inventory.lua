@@ -441,12 +441,18 @@ function Inv.RecalculateStats()
             local tmpl = item.template
             -- 基础值
             for k, v in pairs(tmpl.baseStats) do
-                stats[k] = (stats[k] or 0) + v
+                if type(v) == "number" then
+                    stats[k] = (stats[k] or 0) + v
+                else
+                    stats[k] = v  -- 布尔值等非数字直接赋值
+                end
             end
             -- 等级成长: growthStats * (Level - 1)
             if item.level > 1 and tmpl.growthStats then
                 for k, v in pairs(tmpl.growthStats) do
-                    stats[k] = (stats[k] or 0) + v * (item.level - 1)
+                    if type(v) == "number" then
+                        stats[k] = (stats[k] or 0) + v * (item.level - 1)
+                    end
                 end
             end
         end

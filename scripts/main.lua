@@ -243,6 +243,21 @@ local player = {
     meleeRange = 35,         -- 近战攻击范围(像素)
     meleeArc = math.pi * 0.8, -- 近战扇形角度(弧度, 约144度)
     meleeHitDone = false,    -- 本次挥击是否已判定
+    -- 视觉后坐力
+    recoilX = 0,
+    recoilY = 0,
+}
+
+-- 子弹视觉配色表(bulletFx → 核心/光晕/拖尾颜色)
+local BULLET_FX_COLORS = {
+    normal   = { core = {255, 255, 100}, glow = {255, 255, 150}, trail = {255, 255, 100} },
+    shotgun  = { core = {255, 200, 60},  glow = {255, 220, 100}, trail = {255, 180, 40} },
+    pierce   = { core = {100, 220, 255}, glow = {120, 200, 255}, trail = {80, 180, 255} },
+    bounce   = { core = {100, 255, 120}, glow = {140, 255, 160}, trail = {80, 255, 100} },
+    frost    = { core = {140, 220, 255}, glow = {180, 240, 255}, trail = {100, 200, 255} },
+    burn     = { core = {255, 140, 40},  glow = {255, 100, 20},  trail = {255, 80, 20} },
+    shock    = { core = {180, 140, 255}, glow = {200, 160, 255}, trail = {160, 120, 255} },
+    explosive= { core = {255, 100, 60},  glow = {255, 140, 40},  trail = {255, 80, 30} },
 }
 
 -- 子弹列表
@@ -1182,6 +1197,16 @@ function TryShoot()
             pelletDamage = math.max(1, math.floor(finalDamage * 0.7))
         end
 
+        -- 计算子弹视觉类型(优先级: explosive > shock > burn > frost > pierce > bounce > shotgun > normal)
+        local bfx = "normal"
+        if shotgunPellets > 0 then bfx = "shotgun" end
+        if bounceCount > 0 then bfx = "bounce" end
+        if pierceCount > 0 then bfx = "pierce" end
+        if slowAmt > 0 then bfx = "frost" end
+        if burnDmg > 0 then bfx = "burn" end
+        if shockChance > 0 then bfx = "shock" end
+        if explRadius > 0 then bfx = "explosive" end
+
         table.insert(bullets, {
             x = bx, y = by,
             vx = math.cos(pelletAngle) * WEAPON.bulletSpeed,
@@ -1193,8 +1218,9 @@ function TryShoot()
             trail = {},
             isCrit = isCrit,
             pierce = pierceCount,
-            bounceCount = bounceCount,  -- 弹跳次数
+            bounceCount = bounceCount,
             hitEnemies = {},
+            bulletFx = bfx,
             -- 感电属性(链式闪电)
             shockChance = shockChance > 0 and shockChance or nil,
             shockDamage = shockDamage > 0 and shockDamage or nil,
@@ -1219,31 +1245,73 @@ function TryShoot()
     local shakeStr = shotgunPellets > 0 and 3.0 or 1.5
     TriggerShake(shakeStr, 0.08)
 
-    -- 枪口闪光粒子(火花)
+    -- 视觉后坐力(角色渲染偏移, 方向为射击反方向)
+    local recoilStr = shotgunPellets > 0 and 5.0 or 2.5
+    player.recoilX = -math.cos(player.angle) * recoilStr
+    player.recoilY = -math.sin(player.angle) * recoilStr
+
+    -- 枪口主视觉类型(与子弹 bulletFx 同优先级)
+    local muzzleFx = "normal"
+    if shotgunPellets > 0 then muzzleFx = "shotgun" end
+    if bounceCount > 0 then muzzleFx = "bounce" end
+    if pierceCount > 0 then muzzleFx = "pierce" end
+    if slowAmt > 0 then muzzleFx = "frost" end
+    if burnDmg > 0 then muzzleFx = "burn" end
+    if shockChance > 0 then muzzleFx = "shock" end
+    if explRadius > 0 then muzzleFx = "explosive" end
+
+    -- 枪口闪光配色
+    local mfxColors = {
+        normal    = { {255,220,100}, {255,240,200} },
+        shotgun   = { {255,200,60},  {255,230,150} },
+        pierce    = { {100,200,255}, {180,230,255} },
+        bounce    = { {100,255,120}, {200,255,200} },
+        frost     = { {140,220,255}, {220,240,255} },
+        burn      = { {255,120,30},  {255,200,100} },
+        shock     = { {180,140,255}, {220,200,255} },
+        explosive = { {255,140,40},  {255,220,140} },
+    }
+    local mfxc = mfxColors[muzzleFx] or mfxColors.normal
+    local sparkCol = mfxc[1]
+    local flashCol = mfxc[2]
+
+    -- 枪口闪光粒子(配件染色火花)
     local muzzleX = player.x + math.cos(player.angle) * (player.radius + 5)
     local muzzleY = player.y + math.sin(player.angle) * (player.radius + 5)
-    for j = 1, 8 do
-        local pa = player.angle + (math.random() - 0.5) * 0.8
+    local sparkCount = shotgunPellets > 0 and 14 or 8
+    for j = 1, sparkCount do
+        local pa = player.angle + (math.random() - 0.5) * (shotgunPellets > 0 and 1.2 or 0.8)
         local spd = 150 + math.random() * 200
         table.insert(particles, {
             x = muzzleX, y = muzzleY,
             vx = math.cos(pa) * spd,
             vy = math.sin(pa) * spd,
-            life = 0.1 + math.random() * 0.1,
-            maxLife = 0.2,
-            r = 255, g = 200 + math.random(55), b = 50 + math.random(100),
+            life = 0.1 + math.random() * 0.12,
+            maxLife = 0.22,
+            r = sparkCol[1], g = math.min(255, sparkCol[2] + math.random(30)), b = sparkCol[3] + math.random(40),
             size = 1.5 + math.random() * 3,
             glow = true,
         })
     end
 
-    -- 枪口闪光圆(短暂亮光)
+    -- 枪口闪光圆(短暂亮光, 散弹更大)
+    local flashSize = shotgunPellets > 0 and 18 or 12
     table.insert(particles, {
         x = muzzleX, y = muzzleY, vx = 0, vy = 0,
-        life = 0.06, maxLife = 0.06,
-        r = 255, g = 240, b = 200,
-        size = 12, glow = true, drag = 1.0,
+        life = 0.07, maxLife = 0.07,
+        r = flashCol[1], g = flashCol[2], b = flashCol[3],
+        size = flashSize, glow = true, drag = 1.0,
     })
+
+    -- 暴击额外: 白色核心闪光
+    if isCrit then
+        table.insert(particles, {
+            x = muzzleX, y = muzzleY, vx = 0, vy = 0,
+            life = 0.05, maxLife = 0.05,
+            r = 255, g = 255, b = 255,
+            size = 8, glow = true, drag = 1.0,
+        })
+    end
 
     -- 弹壳抛出(向枪口侧方弹出, 带重力)
     local shellAngle = player.angle + math.pi * 0.5 + (math.random() - 0.5) * 0.4
@@ -1739,6 +1807,13 @@ function UpdatePlayer(dt)
         player.fireTimer = player.fireTimer - dt
     end
 
+    -- 视觉后坐力衰减(快速弹性回复)
+    local recoilDecay = 1.0 - math.min(1.0, dt * 18)
+    player.recoilX = player.recoilX * recoilDecay
+    player.recoilY = player.recoilY * recoilDecay
+    if math.abs(player.recoilX) < 0.1 then player.recoilX = 0 end
+    if math.abs(player.recoilY) < 0.1 then player.recoilY = 0 end
+
     -- 换弹
     if player.reloading then
         player.reloadTimer = player.reloadTimer - dt
@@ -1807,24 +1882,26 @@ function UpdateBullets(dt)
                 -- 清空已击中列表(弹跳后可再次击中)
                 if b.hitEnemies then b.hitEnemies = {} end
 
-                -- 弹跳火花(黄绿色)
-                for j = 1, 6 do
+                -- 弹跳火花(配件染色)
+                local bfxc = BULLET_FX_COLORS[b.bulletFx or "bounce"] or BULLET_FX_COLORS.bounce
+                local bsc = bfxc.core
+                for j = 1, 8 do
                     local pa = math.random() * math.pi * 2
-                    local spd = 60 + math.random() * 80
+                    local spd = 80 + math.random() * 100
                     table.insert(particles, {
                         x = b.x, y = b.y,
                         vx = math.cos(pa) * spd, vy = math.sin(pa) * spd,
-                        life = 0.15 + math.random() * 0.1, maxLife = 0.25,
-                        r = 180, g = 255, b = 80,
-                        size = 1.5 + math.random() * 2, glow = true,
+                        life = 0.15 + math.random() * 0.12, maxLife = 0.27,
+                        r = bsc[1], g = bsc[2], b = bsc[3],
+                        size = 1.5 + math.random() * 2.5, glow = true,
                     })
                 end
-                -- 弹跳闪光
+                -- 弹跳闪光(白绿色环)
                 table.insert(particles, {
                     x = b.x, y = b.y, vx = 0, vy = 0,
-                    life = 0.06, maxLife = 0.06,
-                    r = 200, g = 255, b = 150,
-                    size = 10, glow = true, drag = 1.0,
+                    life = 0.08, maxLife = 0.08,
+                    r = math.min(255, bsc[1] + 60), g = math.min(255, bsc[2] + 40), b = math.min(255, bsc[3] + 60),
+                    size = 12, glow = true, drag = 1.0,
                 })
             else
                 remove = true
@@ -1950,24 +2027,46 @@ function UpdateBullets(dt)
                                 end
                             end
                         end
-                        -- 爆炸冲击波视觉(用粒子环)
-                        for kp = 1, 16 do
-                            local pa = (kp / 16) * math.pi * 2
-                            local spd = b.explosionRadius * 2
+                        -- 爆炸冲击波视觉: 外圈快速扩散环
+                        for kp = 1, 20 do
+                            local pa = (kp / 20) * math.pi * 2 + (math.random() - 0.5) * 0.15
+                            local spd = b.explosionRadius * 2.5
                             table.insert(particles, {
                                 x = e.x, y = e.y,
                                 vx = math.cos(pa) * spd, vy = math.sin(pa) * spd,
-                                life = 0.25, maxLife = 0.25,
+                                life = 0.3, maxLife = 0.3,
                                 r = 255, g = 180, b = 60,
-                                size = 3 + math.random() * 2, glow = true,
+                                size = 3 + math.random() * 2.5, glow = true, drag = 0.95,
                             })
                         end
-                        -- 爆炸中心闪光
+                        -- 内圈慢速烈焰碎片(向上飘)
+                        for kp = 1, 10 do
+                            local pa = math.random() * math.pi * 2
+                            local spd = 30 + math.random() * 60
+                            table.insert(particles, {
+                                x = e.x + (math.random() - 0.5) * 8,
+                                y = e.y + (math.random() - 0.5) * 8,
+                                vx = math.cos(pa) * spd,
+                                vy = math.sin(pa) * spd - 30,
+                                life = 0.35 + math.random() * 0.25,
+                                maxLife = 0.6,
+                                r = 255, g = 100 + math.random(80), b = 20 + math.random(30),
+                                size = 2 + math.random() * 3, glow = true, drag = 0.94,
+                            })
+                        end
+                        -- 爆炸中心白色闪光(更大更亮)
                         table.insert(particles, {
                             x = e.x, y = e.y, vx = 0, vy = 0,
-                            life = 0.12, maxLife = 0.12,
-                            r = 255, g = 220, b = 100,
-                            size = b.explosionRadius * 0.6, glow = true, drag = 1.0,
+                            life = 0.1, maxLife = 0.1,
+                            r = 255, g = 255, b = 220,
+                            size = b.explosionRadius * 0.8, glow = true, drag = 1.0,
+                        })
+                        -- 橙色次级光晕
+                        table.insert(particles, {
+                            x = e.x, y = e.y, vx = 0, vy = 0,
+                            life = 0.15, maxLife = 0.15,
+                            r = 255, g = 160, b = 40,
+                            size = b.explosionRadius * 0.5, glow = true, drag = 1.0,
                         })
                     end
 
@@ -2113,12 +2212,75 @@ function UpdateBullets(dt)
                             gravity = 80, drag = 0.96,
                         })
                     end
-                    -- 命中闪光
+
+                    -- 配件特化击中粒子
+                    local hfx = b.bulletFx or "normal"
+                    if hfx == "burn" then
+                        -- 燃烧: 向上飘升火焰粒子
+                        for k = 1, 5 do
+                            table.insert(particles, {
+                                x = e.x + (math.random() - 0.5) * 10,
+                                y = e.y,
+                                vx = (math.random() - 0.5) * 30,
+                                vy = -(40 + math.random() * 60),
+                                life = 0.3 + math.random() * 0.3,
+                                maxLife = 0.6,
+                                r = 255, g = 100 + math.random(80), b = 20,
+                                size = 2 + math.random() * 2.5, glow = true, drag = 0.97,
+                            })
+                        end
+                    elseif hfx == "frost" then
+                        -- 冰冻: 冰晶碎片(慢速扩散)
+                        for k = 1, 5 do
+                            local pa = math.random() * math.pi * 2
+                            local spd = 20 + math.random() * 40
+                            table.insert(particles, {
+                                x = e.x, y = e.y,
+                                vx = math.cos(pa) * spd, vy = math.sin(pa) * spd,
+                                life = 0.3 + math.random() * 0.3,
+                                maxLife = 0.6,
+                                r = 180, g = 230, b = 255,
+                                size = 1.5 + math.random() * 2, glow = true, drag = 0.92,
+                            })
+                        end
+                    elseif hfx == "shock" then
+                        -- 感电: 微型电弧碎片
+                        for k = 1, 4 do
+                            local pa = math.random() * math.pi * 2
+                            local spd = 50 + math.random() * 80
+                            table.insert(particles, {
+                                x = e.x, y = e.y,
+                                vx = math.cos(pa) * spd, vy = math.sin(pa) * spd,
+                                life = 0.15 + math.random() * 0.1,
+                                maxLife = 0.25,
+                                r = 180, g = 150, b = 255,
+                                size = 1 + math.random() * 2, glow = true,
+                            })
+                        end
+                    elseif hfx == "pierce" then
+                        -- 穿透: 贯穿方向箭头状粒子
+                        for k = 1, 4 do
+                            local pa = bulletDir + (math.random() - 0.5) * 0.4
+                            local spd = 120 + math.random() * 100
+                            table.insert(particles, {
+                                x = e.x, y = e.y,
+                                vx = math.cos(pa) * spd, vy = math.sin(pa) * spd,
+                                life = 0.12 + math.random() * 0.08,
+                                maxLife = 0.2,
+                                r = 100, g = 200, b = 255,
+                                size = 1 + math.random() * 1.5, glow = true,
+                            })
+                        end
+                    end
+
+                    -- 命中闪光(配件染色)
+                    local hitFlashCol = BULLET_FX_COLORS[hfx] or BULLET_FX_COLORS.normal
+                    local hfc = hitFlashCol.core
                     table.insert(particles, {
                         x = b.x, y = b.y, vx = 0, vy = 0,
-                        life = 0.04, maxLife = 0.04,
-                        r = 255, g = 200, b = 150,
-                        size = 10, glow = true, drag = 1.0,
+                        life = 0.05, maxLife = 0.05,
+                        r = hfc[1], g = hfc[2], b = hfc[3],
+                        size = 11, glow = true, drag = 1.0,
                     })
 
                     -- 命中震动 + 停顿 + 音效
@@ -3175,7 +3337,7 @@ end
 function DrawPlayer()
     if not player.alive then return end
 
-    local px, py = player.x, player.y
+    local px, py = player.x + player.recoilX, player.y + player.recoilY
     local r = player.radius
 
     -- 受伤闪烁
@@ -3266,7 +3428,7 @@ function DrawPlayer()
         local frameImg = imgSlashFrames[frameIdx]
 
         -- 透明度: 前70%满亮, 后30%淡出
-        local alpha = rawT < 0.7 and 1.0 or (1.0 - (rawT - 0.7) / 0.3)
+        local slashAlpha = rawT < 0.7 and 1.0 or (1.0 - (rawT - 0.7) / 0.3)
         -- 缩放: 快速弹出后稳定
         local scaleT = math.min(rawT / 0.15, 1.0)
         local scale = 0.6 + 0.4 * (1.0 - (1.0 - scaleT) * (1.0 - scaleT))
@@ -3287,7 +3449,7 @@ function DrawPlayer()
         local offsetY = -drawH * 0.85  -- 刀光主体在角色前方
         local imgPat = nvgImagePattern(vg,
             offsetX, offsetY, drawW, drawH,
-            0, frameImg, alpha)
+            0, frameImg, slashAlpha)
         nvgBeginPath(vg)
         nvgRect(vg, offsetX, offsetY, drawW, drawH)
         nvgFillPaint(vg, imgPat)
@@ -3504,12 +3666,16 @@ function DrawEnemies()
 end
 
 function DrawBullets()
+    local gt = GetTime():GetElapsedTime()
     for _, b in ipairs(bullets) do
-        -- 拖尾轨迹(渐隐线段)
+        local fx = b.bulletFx or "normal"
+        local fxc = BULLET_FX_COLORS[fx] or BULLET_FX_COLORS.normal
+
+        -- === 拖尾轨迹 ===
         if b.trail and #b.trail > 0 then
             local cr, cg, cb
             if b.fromPlayer then
-                cr, cg, cb = 255, 255, 100
+                cr, cg, cb = fxc.trail[1], fxc.trail[2], fxc.trail[3]
             else
                 cr, cg, cb = 255, 100, 80
             end
@@ -3517,8 +3683,9 @@ function DrawBullets()
             local prevX, prevY = b.x, b.y
             for ti = 1, #b.trail do
                 local t = b.trail[ti]
-                local alpha = math.floor(180 * (1 - ti / (#b.trail + 1)))
-                local width = b.radius * 2 * (1 - ti / (#b.trail + 1)) + 0.5
+                local frac = 1 - ti / (#b.trail + 1)
+                local alpha = math.floor(200 * frac)
+                local width = b.radius * 2.2 * frac + 0.5
 
                 nvgBeginPath(vg)
                 nvgMoveTo(vg, prevX, prevY)
@@ -3528,23 +3695,180 @@ function DrawBullets()
                 nvgLineCap(vg, NVG_ROUND)
                 nvgStroke(vg)
 
+                -- burn/frost: 副拖尾(外层光晕线)
+                if b.fromPlayer and (fx == "burn" or fx == "frost" or fx == "shock" or fx == "explosive") then
+                    nvgBeginPath(vg)
+                    nvgMoveTo(vg, prevX, prevY)
+                    nvgLineTo(vg, t.x, t.y)
+                    local gc = fxc.glow
+                    nvgStrokeColor(vg, nvgRGBA(gc[1], gc[2], gc[3], math.floor(alpha * 0.3)))
+                    nvgStrokeWidth(vg, width + 4)
+                    nvgLineCap(vg, NVG_ROUND)
+                    nvgStroke(vg)
+                end
+
                 prevX, prevY = t.x, t.y
             end
         end
 
-        -- 子弹本体(发光效果)
+        -- === 子弹本体 ===
         if b.fromPlayer then
-            -- 外层光晕
-            nvgBeginPath(vg)
-            nvgCircle(vg, b.x, b.y, b.radius + 4)
-            nvgFillColor(vg, nvgRGBA(255, 255, 150, 60))
-            nvgFill(vg)
-            -- 内核
-            nvgBeginPath(vg)
-            nvgCircle(vg, b.x, b.y, b.radius)
-            nvgFillColor(vg, nvgRGBA(255, 255, 100, 255))
-            nvgFill(vg)
+            local cc = fxc.core
+            local gc = fxc.glow
+            local r = b.radius
+
+            if fx == "explosive" then
+                -- 爆炸弹: 大光晕 + 脉冲核心
+                local pulse = 0.85 + 0.15 * math.sin(gt * 20)
+                nvgBeginPath(vg)
+                nvgCircle(vg, b.x, b.y, r + 7)
+                nvgFillColor(vg, nvgRGBA(gc[1], gc[2], gc[3], 40))
+                nvgFill(vg)
+                nvgBeginPath(vg)
+                nvgCircle(vg, b.x, b.y, (r + 2) * pulse)
+                nvgFillColor(vg, nvgRGBA(cc[1], cc[2], cc[3], 255))
+                nvgFill(vg)
+                -- 中心白点
+                nvgBeginPath(vg)
+                nvgCircle(vg, b.x, b.y, r * 0.4)
+                nvgFillColor(vg, nvgRGBA(255, 240, 200, 200))
+                nvgFill(vg)
+
+            elseif fx == "shock" then
+                -- 感电弹: 电弧闪烁 + 紫色核心
+                local flicker = math.random() > 0.3 and 1.0 or 0.6
+                nvgBeginPath(vg)
+                nvgCircle(vg, b.x, b.y, r + 6)
+                nvgFillColor(vg, nvgRGBA(gc[1], gc[2], gc[3], math.floor(50 * flicker)))
+                nvgFill(vg)
+                nvgBeginPath(vg)
+                nvgCircle(vg, b.x, b.y, r)
+                nvgFillColor(vg, nvgRGBA(cc[1], cc[2], cc[3], 255))
+                nvgFill(vg)
+                -- 微型电弧线(随机偏移)
+                for arc = 1, 2 do
+                    local ax = b.x + (math.random() - 0.5) * 12
+                    local ay = b.y + (math.random() - 0.5) * 12
+                    nvgBeginPath(vg)
+                    nvgMoveTo(vg, b.x, b.y)
+                    nvgLineTo(vg, ax, ay)
+                    nvgStrokeColor(vg, nvgRGBA(200, 180, 255, math.floor(180 * flicker)))
+                    nvgStrokeWidth(vg, 1.2)
+                    nvgStroke(vg)
+                end
+
+            elseif fx == "burn" then
+                -- 燃烧弹: 火焰色渐变 + 外焰
+                nvgBeginPath(vg)
+                nvgCircle(vg, b.x, b.y, r + 5)
+                nvgFillColor(vg, nvgRGBA(255, 60, 0, 35))
+                nvgFill(vg)
+                nvgBeginPath(vg)
+                nvgCircle(vg, b.x, b.y, r + 1)
+                nvgFillColor(vg, nvgRGBA(cc[1], cc[2], cc[3], 255))
+                nvgFill(vg)
+                -- 亮黄核心
+                nvgBeginPath(vg)
+                nvgCircle(vg, b.x, b.y, r * 0.5)
+                nvgFillColor(vg, nvgRGBA(255, 255, 150, 220))
+                nvgFill(vg)
+
+            elseif fx == "frost" then
+                -- 冰冻弹: 冰蓝色 + 菱形光点
+                nvgBeginPath(vg)
+                nvgCircle(vg, b.x, b.y, r + 5)
+                nvgFillColor(vg, nvgRGBA(gc[1], gc[2], gc[3], 40))
+                nvgFill(vg)
+                nvgBeginPath(vg)
+                nvgCircle(vg, b.x, b.y, r)
+                nvgFillColor(vg, nvgRGBA(cc[1], cc[2], cc[3], 255))
+                nvgFill(vg)
+                -- 白色中心
+                nvgBeginPath(vg)
+                nvgCircle(vg, b.x, b.y, r * 0.35)
+                nvgFillColor(vg, nvgRGBA(240, 250, 255, 230))
+                nvgFill(vg)
+
+            elseif fx == "pierce" then
+                -- 穿透弹: 尖锐拉长形状(沿速度方向)
+                local bAngle = math.atan(b.vy, b.vx)
+                nvgSave(vg)
+                nvgTranslate(vg, b.x, b.y)
+                nvgRotate(vg, bAngle)
+                -- 光晕
+                nvgBeginPath(vg)
+                nvgEllipse(vg, 0, 0, r + 6, r + 2)
+                nvgFillColor(vg, nvgRGBA(gc[1], gc[2], gc[3], 45))
+                nvgFill(vg)
+                -- 核心(拉长椭圆)
+                nvgBeginPath(vg)
+                nvgEllipse(vg, 0, 0, r + 3, r * 0.7)
+                nvgFillColor(vg, nvgRGBA(cc[1], cc[2], cc[3], 255))
+                nvgFill(vg)
+                nvgRestore(vg)
+
+            elseif fx == "bounce" then
+                -- 弹跳弹: 绿色 + 旋转星形指示
+                local spin = gt * 8
+                nvgBeginPath(vg)
+                nvgCircle(vg, b.x, b.y, r + 4)
+                nvgFillColor(vg, nvgRGBA(gc[1], gc[2], gc[3], 50))
+                nvgFill(vg)
+                nvgBeginPath(vg)
+                nvgCircle(vg, b.x, b.y, r)
+                nvgFillColor(vg, nvgRGBA(cc[1], cc[2], cc[3], 255))
+                nvgFill(vg)
+                -- 旋转指示点
+                for si = 0, 2 do
+                    local sa = spin + si * (math.pi * 2 / 3)
+                    local sx = b.x + math.cos(sa) * (r + 3)
+                    local sy = b.y + math.sin(sa) * (r + 3)
+                    nvgBeginPath(vg)
+                    nvgCircle(vg, sx, sy, 1.2)
+                    nvgFillColor(vg, nvgRGBA(200, 255, 200, 180))
+                    nvgFill(vg)
+                end
+
+            elseif fx == "shotgun" then
+                -- 散弹: 稍小的金色弹丸
+                nvgBeginPath(vg)
+                nvgCircle(vg, b.x, b.y, r + 3)
+                nvgFillColor(vg, nvgRGBA(gc[1], gc[2], gc[3], 50))
+                nvgFill(vg)
+                nvgBeginPath(vg)
+                nvgCircle(vg, b.x, b.y, r * 0.85)
+                nvgFillColor(vg, nvgRGBA(cc[1], cc[2], cc[3], 255))
+                nvgFill(vg)
+
+            else
+                -- normal: 标准黄色子弹
+                nvgBeginPath(vg)
+                nvgCircle(vg, b.x, b.y, r + 4)
+                nvgFillColor(vg, nvgRGBA(gc[1], gc[2], gc[3], 60))
+                nvgFill(vg)
+                nvgBeginPath(vg)
+                nvgCircle(vg, b.x, b.y, r)
+                nvgFillColor(vg, nvgRGBA(cc[1], cc[2], cc[3], 255))
+                nvgFill(vg)
+            end
+
+            -- 暴击附加: 白色十字闪光
+            if b.isCrit then
+                nvgSave(vg)
+                nvgTranslate(vg, b.x, b.y)
+                nvgRotate(vg, gt * 6)
+                nvgBeginPath(vg)
+                nvgRect(vg, -1, -(r + 4), 2, (r + 4) * 2)
+                nvgFillColor(vg, nvgRGBA(255, 255, 255, 140))
+                nvgFill(vg)
+                nvgBeginPath(vg)
+                nvgRect(vg, -(r + 4), -1, (r + 4) * 2, 2)
+                nvgFillColor(vg, nvgRGBA(255, 255, 255, 140))
+                nvgFill(vg)
+                nvgRestore(vg)
+            end
         else
+            -- 敌人子弹: 红色(不变)
             nvgBeginPath(vg)
             nvgCircle(vg, b.x, b.y, b.radius + 3)
             nvgFillColor(vg, nvgRGBA(255, 120, 80, 50))

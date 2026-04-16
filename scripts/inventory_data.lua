@@ -134,9 +134,9 @@ M.ARTIFACT_TEMPLATES = {
         rarity = 1,
         cells = {{0,0}}, boundW = 1, boundH = 1,
         tags = {"Economy"},
-        baseStats = {lootBonus = 20},
-        growthStats = {lootBonus = 8},
-        desc = "掉落率+20%",
+        baseStats = {rarityBoost = 5},
+        growthStats = {rarityBoost = 2},
+        desc = "掉落圣物时,更容易获得高稀有度",
         icon = "coin",
     },
     {
@@ -145,9 +145,9 @@ M.ARTIFACT_TEMPLATES = {
         rarity = 1,
         cells = {{0,0}}, boundW = 1, boundH = 1,
         tags = {"Crit"},
-        baseStats = {critChance = 12},
-        growthStats = {critChance = 4},
-        desc = "暴击率+12%",
+        baseStats = {critChance = 5},
+        growthStats = {critChance = 2},
+        desc = "暴击率+5%",
         icon = "lens",
     },
     {
@@ -191,9 +191,9 @@ M.ARTIFACT_TEMPLATES = {
         rarity = 2,
         cells = {{0,0},{0,1}}, boundW = 1, boundH = 2,
         tags = {"Frost", "Projectile"},
-        baseStats = {damage = 4, slowAmount = 50},
-        growthStats = {damage = 3, slowAmount = 12},
-        desc = "子弹附带减速50%",
+        baseStats = {damage = 4, slowAmount = 25},
+        growthStats = {damage = 3, slowAmount = 8},
+        desc = "子弹附带减速25%",
         icon = "frost",
     },
     {
@@ -281,9 +281,9 @@ M.ARTIFACT_TEMPLATES = {
         rarity = 3,
         cells = {{0,0},{1,0},{1,1}}, boundW = 2, boundH = 2,  -- 反L形
         tags = {"Crit", "Survival"},
-        baseStats = {critChance = 15, critDamage = 35, maxHp = -20},
-        growthStats = {critChance = 4, critDamage = 12},
-        desc = "暴击率+15%,暴伤+35%,但最大生命-20",
+        baseStats = {critChance = 10, critDamage = 20, maxHp = -20},
+        growthStats = {critChance = 3, critDamage = 8},
+        desc = "暴击率+10%,暴伤+20%,但最大生命-20",
         icon = "blood",
     },
     {
@@ -360,7 +360,7 @@ M.ARTIFACT_TEMPLATES = {
         rarity = 4,
         cells = {{0,0},{1,0},{2,0},{3,0}}, boundW = 4, boundH = 1,  -- I形
         tags = {"Frost", "Frost", "Blast"},
-        baseStats = {frostNovaRadius = 75, frostNovaDamage = 35, slowAmount = 60},
+        baseStats = {frostNovaRadius = 75, frostNovaDamage = 35, slowAmount = 35},
         growthStats = {frostNovaDamage = 12},
         desc = "每10秒释放冰霜脉冲,冻结周围敌人",
         icon = "nova",
@@ -553,8 +553,11 @@ M.RARITY_DROP_WEIGHTS = {
 }
 
 --- 随机选择一个圣物模板(加权稀有度)
-function M.RandomArtifactTemplate(maxRarity)
+--- @param maxRarity number 最高可掉落稀有度
+--- @param rarityBoost number|nil 稀有度提升值(百分比), 提升高稀有度权重, 随稀有度递减
+function M.RandomArtifactTemplate(maxRarity, rarityBoost)
     maxRarity = maxRarity or 5
+    rarityBoost = rarityBoost or 0
     -- 第一步: 按稀有度权重选出目标稀有度
     local weightSum = 0
     local tiers = {}
@@ -567,6 +570,15 @@ function M.RandomArtifactTemplate(maxRarity)
                 if t.rarity == r then hasAny = true; break end
             end
             if hasAny then
+                -- rarityBoost: 提升高稀有度权重, 幅度随稀有度递减
+                -- 白色不变, 绿色+boost*0.6, 蓝色+boost*0.35, 紫色+boost*0.15, 金色+boost*0.05
+                if rarityBoost > 0 and r >= 2 then
+                    local boostFactors = {[2] = 0.6, [3] = 0.35, [4] = 0.15, [5] = 0.05}
+                    local factor = boostFactors[r] or 0.05
+                    -- 按百分比提升原始权重, 最低提升1%的原始权重
+                    local boost = w * math.max(0.01, rarityBoost * factor * 0.01)
+                    w = w + boost
+                end
                 table.insert(tiers, { rarity = r, weight = w })
                 weightSum = weightSum + w
             end

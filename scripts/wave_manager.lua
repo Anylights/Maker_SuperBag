@@ -48,10 +48,10 @@ WM.WAVES = {
         dmgMult = 0.8,
         rewardType = "supply",  -- 补给(弹药+血)
     },
-    -- Wave 3: 引入冲锋者, HP开始攀升(幂次曲线起点)
+    -- Wave 3: 引入冲锋者 + 小Boss, HP开始攀升
     {
         name = "灰狼哨站",
-        desc = "攻破灰狼集团的前哨",
+        desc = "灰狼队长在此驻守!",
         type = "combat",
         enemyCount = 28,
         rooms = 14,
@@ -60,6 +60,8 @@ WM.WAVES = {
         hpMult = 1.3,
         dmgMult = 1.0,
         rewardType = "choice",
+        hasMiniBoss = true,      -- 小Boss
+        miniBossHpMult = 1.0,    -- 小Boss HP倍率
     },
     -- Wave 4: 引入重装兵+头狼精锐(精英波, HP跳跃)
     {
@@ -87,10 +89,10 @@ WM.WAVES = {
         dmgMult = 1.4,
         rewardType = "supply",
     },
-    -- Wave 6: 高难度混合, 头狼增多
+    -- Wave 6: 高难度混合 + 小Boss, 头狼增多
     {
         name = "灰狼营地",
-        desc = "捣毁灰狼集团的巢穴",
+        desc = "灰狼精锐队长坐镇此地!",
         type = "combat",
         enemyCount = 48,
         rooms = 16,
@@ -99,6 +101,8 @@ WM.WAVES = {
         hpMult = 3.2,
         dmgMult = 1.6,
         rewardType = "choice",
+        hasMiniBoss = true,      -- 小Boss
+        miniBossHpMult = 1.8,    -- 第6关小Boss更强
     },
     -- Wave 7: Boss前哨(精英波, HP峰值)
     {
@@ -475,31 +479,142 @@ function WM.UpdateTransition(dt)
 end
 
 -- ============================================================================
--- Boss 数据
+-- 小Boss 数据 (第3关/第6关出现)
+-- ============================================================================
+WM.MINI_BOSS_DATA = {
+    name = "灰狼队长",
+    hp = 200,
+    speed = 55,
+    damage = 18,
+    radius = 18,
+    color = {160, 100, 40},
+    sightRange = 350,
+    attackRange = 300,
+    attackRate = 0.5,
+    bulletSpeed = 280,
+    -- 小Boss特殊行为(简化版)
+    chargeSpeed = 240,
+    chargeCooldown = 8.0,
+    shotgunPellets = 3,
+    shotgunSpread = 0.4,
+}
+
+function WM.CreateMiniBoss(x, y, waveMult)
+    local bd = WM.MINI_BOSS_DATA
+    waveMult = waveMult or 1.0
+    local mb = {
+        x = x, y = y,
+        typeKey = "miniboss",
+        hp = math.floor(bd.hp * waveMult),
+        maxHp = math.floor(bd.hp * waveMult),
+        radius = bd.radius,
+        speed = bd.speed,
+        damage = math.floor(bd.damage * waveMult),
+        sightRange = bd.sightRange,
+        attackRange = bd.attackRange,
+        attackRate = bd.attackRate,
+        bulletSpeed = bd.bulletSpeed,
+        color = {bd.color[1], bd.color[2], bd.color[3]},
+        state = "idle",
+        angle = 0,
+        fireTimer = 0,
+        alertTimer = 0,
+        patrolOriginX = x,
+        patrolOriginY = y,
+        patrolAngle = 0,
+        patrolTimer = 0,
+        hitFlashTimer = 0,
+        -- 小Boss专属
+        isMiniBoss = true,
+        chargeTimer = bd.chargeCooldown,
+        isCharging = false,
+        chargeTargetX = 0,
+        chargeTargetY = 0,
+        chargeDuration = 0,
+        attackPattern = "single",  -- 初始单发, 半血后散弹
+        shotgunPellets = bd.shotgunPellets,
+        shotgunSpread = bd.shotgunSpread,
+        armor = 0,
+    }
+    return mb
+end
+
+--- 小Boss行为更新(简化版: 冲锋 + 半血后散弹)
+function WM.UpdateMiniBossBehavior(mb, dt, playerX, playerY)
+    if not mb or mb.hp <= 0 then return nil end
+
+    local bd = WM.MINI_BOSS_DATA
+    local isEnraged = (mb.hp / mb.maxHp) < 0.5
+
+    -- 半血后切换散弹模式
+    if isEnraged then
+        mb.attackPattern = "shotgun"
+        mb.attackRate = bd.attackRate * 0.7
+        -- 狂暴视觉
+        local pulse = math.sin(WM.totalTime * 6) * 0.3 + 0.7
+        mb.color[1] = math.floor(200 * pulse)
+        mb.color[2] = math.floor(80 * pulse)
+        mb.color[3] = math.floor(30 * pulse)
+    end
+
+    -- 冲锋
+    mb.chargeTimer = mb.chargeTimer - dt
+    if mb.chargeTimer <= 0 and not mb.isCharging then
+        local dx = playerX - mb.x
+        local dy = playerY - mb.y
+        local dist = math.sqrt(dx * dx + dy * dy)
+        if dist < 250 and dist > 50 then
+            mb.isCharging = true
+            mb.chargeTargetX = playerX
+            mb.chargeTargetY = playerY
+            mb.chargeDuration = 0.5
+            mb.chargeTimer = isEnraged and (bd.chargeCooldown * 0.6) or bd.chargeCooldown
+        else
+            mb.chargeTimer = 1.0  -- 距离不对, 短冷却重试
+        end
+    end
+
+    local chargeImpact = nil
+    if mb.isCharging then
+        mb.chargeDuration = mb.chargeDuration - dt
+        local angle = math.atan(mb.chargeTargetY - mb.y, mb.chargeTargetX - mb.x)
+        local spd = isEnraged and (bd.chargeSpeed * 1.2) or bd.chargeSpeed
+        mb.x = mb.x + math.cos(angle) * spd * dt
+        mb.y = mb.y + math.sin(angle) * spd * dt
+        if mb.chargeDuration <= 0 then
+            mb.isCharging = false
+        end
+    end
+
+    return chargeImpact
+end
+
+-- ============================================================================
+-- Boss 数据 (最终Boss, 增强版)
 -- ============================================================================
 WM.BOSS_DATA = {
     name = "大灰狼首领",
-    hp = 600,
-    speed = 50,
-    damage = 30,
+    hp = 900,             -- 600→900 增强
+    speed = 55,            -- 50→55
+    damage = 35,           -- 30→35
     radius = 24,
     color = {180, 40, 40},
-    sightRange = 400,
-    attackRange = 350,
-    attackRate = 0.6,
-    bulletSpeed = 300,
+    sightRange = 450,      -- 400→450
+    attackRange = 380,     -- 350→380
+    attackRate = 0.5,      -- 0.6→0.5 更快
+    bulletSpeed = 320,     -- 300→320
     -- 特殊行为
-    summonInterval = 8.0,   -- 每8秒召唤小兵
-    summonCount = 2,         -- 每次召唤2个
-    chargeSpeed = 280,       -- 冲锋速度
-    chargeCooldown = 6.0,    -- 冲锋冷却
-    -- 新攻击模式
-    shotgunPellets = 5,      -- 散弹弹丸数
-    shotgunSpread = 0.5,     -- 散弹扇形角度
-    spinBullets = 8,         -- 旋转弹幕每轮弹数
-    spinInterval = 0.3,      -- 旋转弹幕发射间隔
-    shieldCooldown = 10.0,   -- 护盾冷却
-    shieldDuration = 3.0,    -- 护盾持续
+    summonInterval = 6.0,   -- 8→6 更频繁召唤
+    summonCount = 3,         -- 2→3 更多小兵
+    chargeSpeed = 300,       -- 280→300
+    chargeCooldown = 5.0,    -- 6→5
+    -- 攻击模式(增强)
+    shotgunPellets = 6,      -- 5→6
+    shotgunSpread = 0.55,    -- 0.5→0.55
+    spinBullets = 10,        -- 8→10
+    spinInterval = 0.25,     -- 0.3→0.25 更快
+    shieldCooldown = 8.0,    -- 10→8
+    shieldDuration = 3.5,    -- 3→3.5
 }
 
 function WM.CreateBoss(x, y)

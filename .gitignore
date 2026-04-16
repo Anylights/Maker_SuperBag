@@ -1,8 +1,2 @@
 .build/
 dist/
-.agent/
-.tmp/
-logs/
-.cli/
-.claude/
-.emmylua/

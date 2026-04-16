@@ -78,8 +78,10 @@ function Inv.CreateArtifact(templateId)
 end
 
 --- 随机创建圣物
-function Inv.CreateRandomArtifact(maxRarity)
-    local tmpl = Data.RandomArtifactTemplate(maxRarity)
+--- @param maxRarity number 最高稀有度
+--- @param rarityBoost number|nil 稀有度提升值(来自幸运币等)
+function Inv.CreateRandomArtifact(maxRarity, rarityBoost)
+    local tmpl = Data.RandomArtifactTemplate(maxRarity, rarityBoost)
     if not tmpl then return nil end
     return Inv.CreateArtifact(tmpl.id)
 end
@@ -515,7 +517,7 @@ function Inv.GetStatSummary()
         {key = "slowAmount", name = "减速", fmt = "+%d%%"},
         {key = "shockChance", name = "感电率", fmt = "+%d%%"},
         {key = "hpRegen", name = "生命回复", fmt = "+%.1f/s"},
-        {key = "lootBonus", name = "掉落率", fmt = "+%d%%"},
+        {key = "rarityBoost", name = "稀有度提升", fmt = "+%d%%"},
         {key = "totalAmmo", name = "弹药", fmt = "+%d"},
     }
 

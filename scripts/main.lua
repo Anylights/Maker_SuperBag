@@ -101,6 +101,7 @@ end
 -- 游戏状态
 local STATE_PLAYING = "playing"
 local STATE_PAUSED = "paused"
+local STATE_DYING = "dying"          -- 死亡电影化过渡
 local STATE_GAMEOVER = "gameover"
 local STATE_EXTRACTED = "extracted"  -- 保留兼容(不再用撤离, 用波次通关)
 local STATE_VICTORY = "victory"      -- 全部通关
@@ -272,6 +273,8 @@ local particles = {}
 local damageNumbers = {}
 -- 闪电特效列表
 local lightningEffects = {}  -- {x1,y1,x2,y2,life,maxLife}
+-- 无人机列表
+local drones = {}  -- {x,y,angle,fireTimer,orbitAngle}
 
 -- 地图数据
 local mapData = {}           -- mapData[row][col] = tileType
@@ -292,6 +295,12 @@ local shakeOffsetY = 0
 local hitstopTimer = 0       -- 停顿剩余时间(秒)
 local HITSTOP_HIT = 0.03     -- 命中敌人停顿
 local HITSTOP_KILL = 0.08    -- 击杀停顿
+
+-- 死亡电影化效果
+local deathAnimTimer = 0           -- 死亡动画计时器(从0递增)
+local DEATH_ANIM_DURATION = 3.0    -- 总动画时长(秒)
+local deathZoomStart = 1.3         -- 死亡时的起始缩放
+local deathSlowScale = 1.0         -- 死亡减速因子(1.0→0)
 
 -- 走出动画状态
 local walkoutStartX = 0      -- 走出动画起始位置
@@ -719,6 +728,27 @@ function SpawnEnemies()
     local dmgMult = WM.GetDmgMult()
     local MIN_ENEMY_DIST = 100
 
+    -- 小Boss波: 生成小Boss(第3/6关)
+    if wave and wave.hasMiniBoss and #floorTiles > 0 then
+        -- 选择离玩家较远的位置给小Boss
+        local bestTile = floorTiles[1]
+        local bestDist = 0
+        for _, tile in ipairs(floorTiles) do
+            local wx = (tile.c - 0.5) * TILE_SIZE
+            local wy = (tile.r - 0.5) * TILE_SIZE
+            local d = math.sqrt((wx - player.x)^2 + (wy - player.y)^2)
+            if d > bestDist then
+                bestDist = d
+                bestTile = tile
+            end
+        end
+        local mbx = (bestTile.c - 0.5) * TILE_SIZE
+        local mby = (bestTile.r - 0.5) * TILE_SIZE
+        local miniBoss = WM.CreateMiniBoss(mbx, mby, wave.miniBossHpMult or 1.0)
+        table.insert(enemies, miniBoss)
+        print("Wave " .. WM.currentWave .. ": Spawned Mini-Boss at (" .. math.floor(mbx) .. "," .. math.floor(mby) .. ")")
+    end
+
     -- Boss波: 先生成Boss
     if wave and wave.type == "boss" and #floorTiles > 0 then
         -- 选择离玩家最远的位置给Boss
@@ -923,9 +953,35 @@ function HandleMouseDown(eventType, eventData)
 
     if gameState ~= STATE_PLAYING then return end
 
-    -- 奖励选择阶段: 点击确认
+    -- 奖励选择阶段: 鼠标直接点击卡片选择
     if WM.phase == WM.PHASE_REWARD and button == MOUSEB_LEFT then
-        HandleRewardClick()
+        local mx, my = ScreenToDesign(input:GetMousePosition().x, input:GetMousePosition().y)
+        local wave = WM.GetCurrentWave()
+        local isSupply = (wave and wave.rewardType == "supply")
+        if isSupply then
+            -- 补给型: 点击任意处确认
+            HandleRewardClick()
+        else
+            -- 三选一: 检测点击了哪张卡片
+            local choices = WM.rewardChoices
+            local cardCount = #choices
+            if cardCount > 0 then
+                local cardW = 140
+                local cardH = 170
+                local gap = 20
+                local totalW = cardCount * cardW + (cardCount - 1) * gap
+                local startX = (DESIGN_W - totalW) / 2
+                local cardY = (DESIGN_H - cardH) / 2 + 10
+                for i = 1, cardCount do
+                    local cx = startX + (i - 1) * (cardW + gap)
+                    if mx >= cx and mx <= cx + cardW and my >= cardY and my <= cardY + cardH then
+                        WM.selectedReward = i
+                        HandleRewardClick()
+                        return
+                    end
+                end
+            end
+        end
         return
     end
 
@@ -1019,19 +1075,10 @@ end
 function HandleKeyDown(eventType, eventData)
     local key = eventData["Key"]:GetInt()
 
-    -- 奖励选择阶段: 左右键/1-3数字选择
+    -- 奖励选择阶段: 数字键快捷选择
     if WM.phase == WM.PHASE_REWARD and gameState == STATE_PLAYING then
         local numChoices = #WM.rewardChoices
-        if key == KEY_A or key == KEY_LEFT then
-            WM.selectedReward = math.max(1, WM.selectedReward - 1)
-            return
-        elseif key == KEY_D or key == KEY_RIGHT then
-            WM.selectedReward = math.min(numChoices, WM.selectedReward + 1)
-            return
-        elseif key == KEY_RETURN or key == KEY_SPACE then
-            HandleRewardClick()
-            return
-        elseif key == KEY_1 and numChoices >= 1 then
+        if key == KEY_1 and numChoices >= 1 then
             WM.selectedReward = 1; HandleRewardClick(); return
         elseif key == KEY_2 and numChoices >= 2 then
             WM.selectedReward = 2; HandleRewardClick(); return
@@ -1334,9 +1381,34 @@ end
 -- 更新逻辑
 -- ============================================================================
 function HandleUpdate(eventType, eventData)
+    local rawDt = eventData["TimeStep"]:GetFloat()
+
+    -- 死亡电影化效果更新
+    if gameState == STATE_DYING then
+        deathAnimTimer = deathAnimTimer + rawDt
+        -- 进度 0→1
+        local progress = math.min(1.0, deathAnimTimer / DEATH_ANIM_DURATION)
+        -- 时间减速: 快速降到接近0
+        deathSlowScale = math.max(0, 1.0 - progress * 2.5)
+        -- 相机缩放: 拉近到2.2(慢慢zoom in到玩家)
+        local targetZoom = 2.2
+        local zoomProgress = math.min(1.0, progress * 1.5)  -- 前2/3时间完成缩放
+        local ease = 1.0 - (1.0 - zoomProgress) * (1.0 - zoomProgress)  -- ease-out
+        camZoom = deathZoomStart + (targetZoom - deathZoomStart) * ease
+        -- 更新相机位置(跟随玩家)
+        UpdateCamera()
+        -- 慢速更新粒子(视觉残留)
+        UpdateParticles(rawDt * deathSlowScale)
+        UpdateDamageNumbers(rawDt * deathSlowScale)
+        -- 动画结束 → 进入GAMEOVER
+        if deathAnimTimer >= DEATH_ANIM_DURATION then
+            gameState = STATE_GAMEOVER
+        end
+        return
+    end
+
     if gameState ~= STATE_PLAYING then return end
 
-    local rawDt = eventData["TimeStep"]:GetFloat()
     local dt = rawDt * gameTimeScale  -- 应用背包慢速
     gameTimeAcc = gameTimeAcc + rawDt  -- 累计时间(摇摆动画)
     local g = GetGraphics()
@@ -1483,6 +1555,7 @@ function HandleUpdate(eventType, eventData)
     WM.UpdateDifficulty(player.hp / (player.maxHp + Inv.GetStat("maxHp", 0)))
 
     UpdatePlayer(dt)
+    UpdateDrones(dt)
     UpdateBullets(dt)
     UpdateEnemies(dt)
     UpdateParticles(dt)
@@ -1514,7 +1587,10 @@ function HandleUpdate(eventType, eventData)
                 if player.hp <= 0 then
                     player.hp = 0
                     player.alive = false
-                    gameState = STATE_GAMEOVER
+                    gameState = STATE_DYING
+                    deathAnimTimer = 0
+                    deathZoomStart = camZoom
+                    deathSlowScale = 1.0
                 end
             end
             -- 冲击波视觉(扩散环)
@@ -1544,6 +1620,13 @@ function HandleUpdate(eventType, eventData)
                     trail = {},
                 })
             end
+        end
+    end
+
+    -- 小Boss特殊行为(冲锋+半血散弹)
+    for _, e in ipairs(enemies) do
+        if e.isMiniBoss and e.hp > 0 then
+            WM.UpdateMiniBossBehavior(e, dt, player.x, player.y)
         end
     end
 
@@ -2319,13 +2402,13 @@ function UpdateBullets(dt)
                         if e.typeKey == "sentry" then dropRarityMax = 4 end  -- 哨兵可掉紫
                         if WM.currentWave >= 5 then dropRarityMax = math.max(dropRarityMax, 4) end  -- 后期全员可掉紫
 
-                        -- 掉落率受背包加成影响(基础18%, 大幅下调)
-                        local lootBonusPct = Inv.GetStat("lootBonus", 0)
-                        local artifactChance = 18 + lootBonusPct * 0.3   -- 基础18%
+                        -- 掉落率固定18%, 幸运币提升高稀有度概率(不影响掉落率)
+                        local artifactChance = 18
+                        local rarityBoost = Inv.GetStat("rarityBoost", 0)
 
                         if invLootRoll <= artifactChance then
                             -- 掉落圣物(掉到地面, 需要玩家走过去拾取)
-                            local artifact = Inv.CreateRandomArtifact(dropRarityMax)
+                            local artifact = Inv.CreateRandomArtifact(dropRarityMax, rarityBoost)
                             if artifact then
                                 table.insert(lootItems, {
                                     x = e.x + math.random(-8, 8),
@@ -2434,7 +2517,10 @@ function UpdateBullets(dt)
                     if player.hp <= 0 then
                         player.hp = 0
                         player.alive = false
-                        gameState = STATE_GAMEOVER
+                        gameState = STATE_DYING
+                        deathAnimTimer = 0
+                        deathZoomStart = camZoom
+                        deathSlowScale = 1.0
                     end
                 end
                 remove = true
@@ -2450,6 +2536,95 @@ function UpdateBullets(dt)
     for i = #enemies, 1, -1 do
         if enemies[i].dead then
             table.remove(enemies, i)
+        end
+    end
+end
+
+-- ============================================================================
+-- 无人机系统
+-- ============================================================================
+function UpdateDrones(dt)
+    local droneDmg = Inv.GetStat("droneDamage", 0)
+    local droneRate = Inv.GetStat("droneRate", 0)
+    if droneDmg <= 0 then
+        drones = {}
+        return
+    end
+
+    -- 确保有一架无人机
+    if #drones == 0 then
+        table.insert(drones, {
+            x = player.x, y = player.y - 30,
+            angle = 0, fireTimer = 0, orbitAngle = 0,
+        })
+    end
+
+    local DRONE_ORBIT_RADIUS = 35
+    local DRONE_ORBIT_SPEED = 2.5    -- 环绕速度(弧度/秒)
+    local DRONE_RANGE = 200          -- 索敌范围(像素)
+    local DRONE_BULLET_SPEED = 350
+    local fireInterval = math.max(0.15, droneRate)
+
+    for _, d in ipairs(drones) do
+        -- 环绕玩家
+        d.orbitAngle = d.orbitAngle + DRONE_ORBIT_SPEED * dt
+        local targetX = player.x + math.cos(d.orbitAngle) * DRONE_ORBIT_RADIUS
+        local targetY = player.y + math.sin(d.orbitAngle) * DRONE_ORBIT_RADIUS - 20
+        -- 平滑跟随
+        local followSpeed = 8.0
+        d.x = d.x + (targetX - d.x) * math.min(1.0, followSpeed * dt)
+        d.y = d.y + (targetY - d.y) * math.min(1.0, followSpeed * dt)
+
+        -- 索敌: 找最近敌人
+        local bestDist = DRONE_RANGE
+        local bestEnemy = nil
+        for _, e in ipairs(enemies) do
+            if not e.dead then
+                local ex = e.x - d.x
+                local ey = e.y - d.y
+                local dist = math.sqrt(ex * ex + ey * ey)
+                if dist < bestDist then
+                    bestDist = dist
+                    bestEnemy = e
+                end
+            end
+        end
+
+        -- 瞄准
+        if bestEnemy then
+            d.angle = math.atan(bestEnemy.y - d.y, bestEnemy.x - d.x)
+        end
+
+        -- 射击
+        d.fireTimer = d.fireTimer - dt
+        if d.fireTimer <= 0 and bestEnemy then
+            d.fireTimer = fireInterval
+            local bx = d.x + math.cos(d.angle) * 8
+            local by = d.y + math.sin(d.angle) * 8
+            table.insert(bullets, {
+                x = bx, y = by,
+                vx = math.cos(d.angle) * DRONE_BULLET_SPEED,
+                vy = math.sin(d.angle) * DRONE_BULLET_SPEED,
+                damage = droneDmg,
+                radius = 2.5,
+                fromPlayer = true,
+                life = 1.2,
+                trail = {},
+                isCrit = false,
+                pierce = 0,
+                bounceCount = 0,
+                hitEnemies = {},
+                bulletFx = "shock",  -- 无人机子弹使用电弧视觉
+                isDrone = true,
+            })
+            -- 微型枪口闪光
+            table.insert(particles, {
+                x = bx, y = by,
+                vx = math.cos(d.angle) * 40, vy = math.sin(d.angle) * 40,
+                life = 0.08, maxLife = 0.08,
+                r = 180, g = 140, b = 255,
+                size = 4, glow = true,
+            })
         end
     end
 end
@@ -2678,7 +2853,10 @@ function UpdateEnemies(dt)
                         if player.hp <= 0 then
                             player.hp = 0
                             player.alive = false
-                            gameState = STATE_GAMEOVER
+                            gameState = STATE_DYING
+                            deathAnimTimer = 0
+                            deathZoomStart = camZoom
+                            deathSlowScale = 1.0
                         end
                     end
                 end
@@ -2776,13 +2954,9 @@ function UpdateSearch(dt)
                     amount = math.random(cfg.healthRange[1], cfg.healthRange[2])})
             else
                 -- 掉落圣物
-                local lootBonusPct = Inv.GetStat("lootBonus", 0)
+                local rarityBoost = Inv.GetStat("rarityBoost", 0)
                 local maxRarity = cfg.maxRarity
-                -- 背包加成可能提升1级最大稀有度
-                if lootBonusPct >= 30 then
-                    maxRarity = math.min(5, maxRarity + 1)
-                end
-                local artifact = Inv.CreateRandomArtifact(maxRarity)
+                local artifact = Inv.CreateRandomArtifact(maxRarity, rarityBoost)
                 if artifact then
                     table.insert(lootItems, {
                         x = cx + math.random(-6, 6),
@@ -2873,6 +3047,7 @@ function RestartGame()
     lootItems = {}
     particles = {}
     damageNumbers = {}
+    drones = {}
     searchingCrate = nil
 
     gameTime = 0
@@ -2895,6 +3070,11 @@ function RestartGame()
             itemData = starterArtifact,
         })
     end
+
+    -- 重置相机和死亡动画
+    camZoom = 1.3
+    deathAnimTimer = 0
+    deathSlowScale = 1.0
 
     -- 重置波次管理器
     WM.Init()
@@ -2953,6 +3133,9 @@ function HandleNanoVGRender(eventType, eventData)
 
     -- 绘制玩家
     DrawPlayer()
+
+    -- 绘制无人机
+    DrawDrones()
 
     -- 绘制粒子
     DrawParticles()
@@ -3179,6 +3362,15 @@ function HandleNanoVGRender(eventType, eventData)
         nvgRect(vg, 0, 0, DESIGN_W, DESIGN_H)
         nvgFillColor(vg, nvgRGBA(0, 0, 0, math.floor(math.min(255, WM.transitAlpha))))
         nvgFill(vg)
+        nvgRestore(vg)
+    end
+
+    -- 死亡电影化效果(灰色遮罩+文字淡入)
+    if gameState == STATE_DYING then
+        nvgSave(vg)
+        nvgTranslate(vg, renderOffsetX, renderOffsetY)
+        nvgScale(vg, renderScale, renderScale)
+        DrawDeathCinematic(DESIGN_W, DESIGN_H)
         nvgRestore(vg)
     end
 
@@ -3459,6 +3651,57 @@ function DrawPlayer()
     end
 end
 
+function DrawDrones()
+    for _, d in ipairs(drones) do
+        local sx = (d.x - camX) * camZoom
+        local sy = (d.y - camY) * camZoom
+        local s = camZoom
+
+        nvgSave(vg)
+        nvgTranslate(vg, sx, sy)
+
+        -- 光晕底座(紫色发光)
+        nvgBeginPath(vg)
+        nvgCircle(vg, 0, 0, 12 * s)
+        nvgFillColor(vg, nvgRGBA(160, 120, 255, 40))
+        nvgFill(vg)
+
+        -- 机身: 小菱形
+        nvgSave(vg)
+        nvgRotate(vg, d.angle)
+        -- 主体
+        nvgBeginPath(vg)
+        nvgMoveTo(vg, 8 * s, 0)
+        nvgLineTo(vg, -4 * s, -5 * s)
+        nvgLineTo(vg, -6 * s, 0)
+        nvgLineTo(vg, -4 * s, 5 * s)
+        nvgClosePath(vg)
+        nvgFillColor(vg, nvgRGBA(140, 110, 220, 230))
+        nvgFill(vg)
+        nvgStrokeColor(vg, nvgRGBA(200, 180, 255, 200))
+        nvgStrokeWidth(vg, 1.0 * s)
+        nvgStroke(vg)
+
+        -- 炮口亮点
+        nvgBeginPath(vg)
+        nvgCircle(vg, 8 * s, 0, 2 * s)
+        nvgFillColor(vg, nvgRGBA(220, 200, 255, 255))
+        nvgFill(vg)
+        nvgRestore(vg)
+
+        -- 推进器尾焰(闪烁)
+        local flicker = 0.6 + 0.4 * math.sin(gameTimeAcc * 15 + d.orbitAngle)
+        local tailX = -math.cos(d.angle) * 7 * s
+        local tailY = -math.sin(d.angle) * 7 * s
+        nvgBeginPath(vg)
+        nvgCircle(vg, tailX, tailY, (2.5 + flicker) * s)
+        nvgFillColor(vg, nvgRGBA(180, 140, 255, math.floor(120 * flicker)))
+        nvgFill(vg)
+
+        nvgRestore(vg)
+    end
+end
+
 function DrawEnemies()
     for i, e in ipairs(enemies) do
         local alpha = 255
@@ -3514,6 +3757,43 @@ function DrawEnemies()
                 nvgStrokeWidth(vg, 2)
                 nvgStroke(vg)
             end
+        end
+
+        -- 小Boss专属: 橙色光环 + 冲刺拖影
+        if e.isMiniBoss then
+            local mbPulse = math.sin(gameTimeAcc * 4) * 0.3 + 0.7
+            nvgBeginPath(vg)
+            nvgCircle(vg, e.x, e.y, e.radius + 4)
+            nvgStrokeColor(vg, nvgRGBA(220, 140, 40, math.floor(140 * mbPulse)))
+            nvgStrokeWidth(vg, 2.5)
+            nvgStroke(vg)
+            -- 冲锋拖影
+            if e.isCharging then
+                nvgBeginPath(vg)
+                nvgCircle(vg, e.x, e.y, e.radius + 3)
+                nvgFillColor(vg, nvgRGBA(220, 120, 30, 60))
+                nvgFill(vg)
+            end
+            -- 小Boss头顶名字
+            nvgFontFace(vg, "sans")
+            nvgFontSize(vg, 9)
+            nvgTextAlign(vg, NVG_ALIGN_CENTER + NVG_ALIGN_MIDDLE)
+            nvgFillColor(vg, nvgRGBA(255, 180, 60, 220))
+            nvgText(vg, e.x, e.y - e.radius - 14, "灰狼队长", nil)
+            -- 小Boss血条
+            local mbBarW = 30
+            local mbBarH = 3
+            local mbBarX = e.x - mbBarW / 2
+            local mbBarY = e.y - e.radius - 8
+            nvgBeginPath(vg)
+            nvgRect(vg, mbBarX, mbBarY, mbBarW, mbBarH)
+            nvgFillColor(vg, nvgRGBA(40, 40, 40, 180))
+            nvgFill(vg)
+            local hpRatio = math.max(0, e.hp / e.maxHp)
+            nvgBeginPath(vg)
+            nvgRect(vg, mbBarX, mbBarY, mbBarW * hpRatio, mbBarH)
+            nvgFillColor(vg, nvgRGBA(220, 140, 40, 255))
+            nvgFill(vg)
         end
 
         -- 重装兵专属: 护甲光环(灰蓝色金属质感)
@@ -4334,7 +4614,7 @@ function DrawRewardScreen(w, h)
 
         nvgFontSize(vg, 12)
         nvgFillColor(vg, nvgRGBA(180, 180, 180, 200))
-        nvgText(vg, w / 2, h * 0.18 + 24, "A/D 或 ←/→ 切换  |  Enter/Space/点击 确认", nil)
+        nvgText(vg, w / 2, h * 0.18 + 24, "点击卡片选择  |  数字键 1-3 快捷选择", nil)
 
         local choices = WM.rewardChoices
         local cardCount = #choices
@@ -4347,24 +4627,31 @@ function DrawRewardScreen(w, h)
         local startX = (w - totalW) / 2
         local cardY = (h - cardH) / 2 + 10
 
+        -- 获取鼠标在设计坐标中的位置(用于悬停检测)
+        local rawMX = input:GetMousePosition().x
+        local rawMY = input:GetMousePosition().y
+        local mouseDX, mouseDY = ScreenToDesign(rawMX, rawMY)
+
         for i, reward in ipairs(choices) do
             local cx = startX + (i - 1) * (cardW + gap)
-            local selected = (i == WM.selectedReward)
+            -- 鼠标悬停检测
+            local hovered = (mouseDX >= cx and mouseDX <= cx + cardW
+                and mouseDY >= cardY and mouseDY <= cardY + cardH)
 
             -- 卡片背景
             nvgBeginPath(vg)
             nvgRoundedRect(vg, cx, cardY, cardW, cardH, 10)
-            if selected then
-                nvgFillColor(vg, nvgRGBA(50, 55, 80, 240))
+            if hovered then
+                nvgFillColor(vg, nvgRGBA(55, 60, 90, 245))
             else
                 nvgFillColor(vg, nvgRGBA(35, 38, 55, 220))
             end
             nvgFill(vg)
 
-            -- 选中边框(高亮)
+            -- 悬停边框(高亮)
             nvgBeginPath(vg)
             nvgRoundedRect(vg, cx, cardY, cardW, cardH, 10)
-            if selected then
+            if hovered then
                 local glow = math.sin(GetTime():GetElapsedTime() * 4) * 0.3 + 0.7
                 nvgStrokeColor(vg, nvgRGBA(255, 220, 80, math.floor(220 * glow)))
                 nvgStrokeWidth(vg, 2.5)
@@ -4378,12 +4665,12 @@ function DrawRewardScreen(w, h)
             local iconY = cardY + 25
             local iconSize = 32
             local iconCX = cx + cardW / 2
-            DrawRewardIcon(iconCX, iconY + iconSize / 2, iconSize, reward.icon, selected)
+            DrawRewardIcon(iconCX, iconY + iconSize / 2, iconSize, reward.icon, hovered)
 
             -- 名称
             nvgFontSize(vg, 14)
             nvgTextAlign(vg, NVG_ALIGN_CENTER + NVG_ALIGN_MIDDLE)
-            if selected then
+            if hovered then
                 nvgFillColor(vg, nvgRGBA(255, 240, 200, 255))
             else
                 nvgFillColor(vg, nvgRGBA(200, 200, 200, 220))
@@ -4779,6 +5066,53 @@ function DrawMinimap(sw, sh)
     nvgBeginPath(vg)
     nvgCircle(vg, mmX + player.x * scale, mmY + player.y * scale, 2.5)
     nvgFillColor(vg, nvgRGBA(60, 255, 60, 255))
+    nvgFill(vg)
+end
+
+--- 死亡电影化渲染(灰色遮罩 + 文字缓缓出现)
+function DrawDeathCinematic(w, h)
+    local progress = math.min(1.0, deathAnimTimer / DEATH_ANIM_DURATION)
+
+    -- 灰色/暗色遮罩(渐渐变灰变暗)
+    local grayAlpha = math.floor(math.min(140, progress * 200))
+    nvgBeginPath(vg)
+    nvgRect(vg, 0, 0, w, h)
+    -- 用半透明灰色叠加实现去饱和效果
+    nvgFillColor(vg, nvgRGBA(30, 30, 35, grayAlpha))
+    nvgFill(vg)
+
+    -- 文字: 从progress=0.4开始淡入
+    local textProgress = math.max(0, (progress - 0.4) / 0.6)
+    if textProgress > 0 then
+        local textAlpha = math.floor(math.min(255, textProgress * 300))
+        nvgFontFace(vg, "sans")
+        nvgTextAlign(vg, NVG_ALIGN_CENTER + NVG_ALIGN_MIDDLE)
+
+        -- 主文字: "你失败了..."
+        nvgFontSize(vg, 36)
+        -- 文字从下方略微上移
+        local textOffY = (1.0 - math.min(1.0, textProgress * 2)) * 20
+        nvgFillColor(vg, nvgRGBA(220, 60, 60, textAlpha))
+        nvgText(vg, w / 2, h / 2 - 10 + textOffY, "你失败了...", nil)
+
+        -- 副文字(延迟出现)
+        if textProgress > 0.4 then
+            local subAlpha = math.floor(math.min(180, (textProgress - 0.4) * 350))
+            nvgFontSize(vg, 14)
+            nvgFillColor(vg, nvgRGBA(180, 180, 180, subAlpha))
+            nvgText(vg, w / 2, h / 2 + 30 + textOffY,
+                "进度: Wave " .. WM.currentWave .. "/" .. #WM.WAVES, nil)
+        end
+    end
+
+    -- 屏幕边缘暗角(加强电影感)
+    local vignetteAlpha = math.floor(math.min(80, progress * 120))
+    -- 四周渐变暗角用简单矩形叠加模拟
+    nvgBeginPath(vg)
+    nvgRect(vg, 0, 0, w, h)
+    local vignette = nvgRadialGradient(vg, w/2, h/2, math.min(w,h)*0.3, math.max(w,h)*0.7,
+        nvgRGBA(0, 0, 0, 0), nvgRGBA(0, 0, 0, vignetteAlpha))
+    nvgFillPaint(vg, vignette)
     nvgFill(vg)
 end
 

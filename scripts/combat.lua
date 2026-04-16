@@ -23,6 +23,7 @@ function Combat.TryMelee()
     G.player.meleeSwingTimer = G.player.meleeSwingDur
     G.player.meleeTimer = G.player.meleeCooldown
     G.player.meleeHitDone = false
+    G.PlaySfx(G.sndMeleeSwing, 0.4)
 end
 
 function Combat.TryShoot()
@@ -407,6 +408,7 @@ function Combat.UpdateDrones(dt)
         d.fireTimer = d.fireTimer - dt
         if d.fireTimer <= 0 and bestEnemy then
             d.fireTimer = fireInterval
+            G.PlaySfx(G.sndDroneShoot, 0.25)
             local bx = d.x + math.cos(d.angle) * 8
             local by = d.y + math.sin(d.angle) * 8
             table.insert(G.bullets, {

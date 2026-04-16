@@ -167,8 +167,11 @@ G.BULLET_FX_COLORS = {
     frost    = { core = {140, 220, 255}, glow = {180, 240, 255}, trail = {100, 200, 255} },
     burn     = { core = {255, 140, 40},  glow = {255, 100, 20},  trail = {255, 80, 20} },
     shock    = { core = {180, 140, 255}, glow = {200, 160, 255}, trail = {160, 120, 255} },
-    explosive= { core = {255, 100, 60},  glow = {255, 140, 40},  trail = {255, 80, 30} },
+    explosive= { core = {255, 180, 40},  glow = {255, 200, 60},  trail = {255, 160, 20} },
 }
+
+-- 闪电链延迟队列
+G.pendingChainLightning = {}
 
 -- 命中停顿常量
 G.HITSTOP_HIT  = 0.03

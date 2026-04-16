@@ -11,10 +11,7 @@ local RH = {}
 
 -- 常量别名
 local TILE_SIZE       = G.TILE_SIZE
-local MAP_COLS        = G.MAP_COLS
-local MAP_ROWS        = G.MAP_ROWS
-local MAP_W           = G.MAP_W
-local MAP_H           = G.MAP_H
+-- MAP_COLS/MAP_ROWS/MAP_W/MAP_H 随波次动态变化，不缓存，直接使用 G.*
 local TILE_WALL       = G.TILE_WALL
 local TILE_EXIT       = G.TILE_EXIT
 local TILE_CRATE_WOOD = G.TILE_CRATE_WOOD
@@ -552,15 +549,15 @@ function RH.DrawMinimap(sw, sh)
     local mmSize = 100
     local mmX = sw - mmSize - 12
     local mmY = sh - mmSize - 30
-    local scale = mmSize / math.max(MAP_W, MAP_H)
+    local scale = mmSize / math.max(G.MAP_W, G.MAP_H)
 
     nvgBeginPath(vg)
     nvgRoundedRect(vg, mmX - 2, mmY - 2, mmSize + 4, mmSize + 4, 4)
     nvgFillColor(vg, nvgRGBA(0, 0, 0, 180))
     nvgFill(vg)
 
-    for r = 1, MAP_ROWS do
-        for c = 1, MAP_COLS do
+    for r = 1, G.MAP_ROWS do
+        for c = 1, G.MAP_COLS do
             local tile = mapData[r][c]
             if tile ~= TILE_WALL then
                 local tx = mmX + (c - 1) * TILE_SIZE * scale

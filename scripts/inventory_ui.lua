@@ -6,6 +6,7 @@
 
 local Data = require("inventory_data")
 local Inv = require("inventory")
+local G = require("game_context")
 
 local UI = {}
 
@@ -145,6 +146,7 @@ function UI.HandleMouseDown(mx, my, button)
             Inv.RotateItem(UI.dragItem)
             -- 交换拖拽偏移以保持视觉居中
             UI.dragOffsetX, UI.dragOffsetY = UI.dragOffsetY, UI.dragOffsetX
+            G.PlaySfx(G.sndItemRotate, 0.3)
             return true
         end
         return true
@@ -174,6 +176,7 @@ function UI.HandleMouseUp(mx, my, button)
 
         if Inv.CanPlace(item, placeCol, placeRow) then
             Inv.PlaceItem(item, placeCol, placeRow)
+            G.PlaySfx(G.sndItemPlace, 0.4)
             if source == "pickup" and lootRef and UI.onPickupPlaced then
                 UI.onPickupPlaced(lootRef)
             end
@@ -181,6 +184,7 @@ function UI.HandleMouseUp(mx, my, button)
             local outsidePanel = mx < panelX_ or mx > panelX_ + panelW_
                               or my < panelY_ or my > panelY_ + panelH_
             if outsidePanel then
+                G.PlaySfx(G.sndItemDiscard, 0.3)
                 if source == "pickup" then
                     UI.AddToPickup(item, lootRef)
                 else
@@ -208,6 +212,7 @@ function UI.HandleKeyDown(key)
     if key == KEY_R and UI.dragItem then
         Inv.RotateItem(UI.dragItem)
         UI.dragOffsetX, UI.dragOffsetY = UI.dragOffsetY, UI.dragOffsetX
+        G.PlaySfx(G.sndItemRotate, 0.3)
         return true
     end
 

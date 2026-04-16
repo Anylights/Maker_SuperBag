@@ -60,6 +60,7 @@ function Bullet.UpdateBullets(dt)
                 b.y = prevY
                 b.bounceCount = b.bounceCount - 1
                 b.life = math.max(b.life, 1.0)  -- 延长寿命
+                G.PlaySfx(G.sndBulletBounce, 0.3)
                 -- 清空已击中列表(弹跳后可再次击中)
                 if b.hitEnemies then b.hitEnemies = {} end
 
@@ -152,14 +153,17 @@ function Bullet.UpdateBullets(dt)
                         e.burnTimer = b.burnDuration or 2.0
                         e.burnDamage = b.burnDamage
                         e.burnTickTimer = e.burnTickTimer or 0
+                        G.PlaySfx(G.sndBurnHit, 0.25)
                     end
                     -- 减速: 降低移动速度
                     if b.slowAmount and b.slowAmount > 0 then
                         e.slowTimer = b.slowDuration or 2.0
                         e.slowPercent = math.min(0.8, (b.slowAmount / 100))  -- 最多减速80%
+                        G.PlaySfx(G.sndFrostHit, 0.25)
                     end
                     -- 爆炸: 对周围敌人造成AOE伤害
                     if b.explosionRadius and b.explosionRadius > 0 and b.explosionDamage and b.explosionDamage > 0 then
+                        G.PlaySfx(G.sndExplosion, 0.5)
                         for k2 = #G.enemies, 1, -1 do
                             local e2 = G.enemies[k2]
                             if e2 ~= e then
@@ -251,94 +255,26 @@ function Bullet.UpdateBullets(dt)
                         })
                     end
 
-                    -- === 感电链式闪电(递归最近敌人) ===
+                    -- === 感电链式闪电(延迟队列，逐跳传递) ===
                     if b.shockChance and b.shockChance > 0 then
                         if math.random(1, 100) <= b.shockChance then
+                            G.PlaySfx(G.sndChainLightning, 0.4)
                             local sDmg = b.shockDamage or 8
                             local maxBounces = b.chainCount or 2
                             local searchRange = b.chainRange or 120
-                            local damageDecay = 0.8  -- 每跳衰减20%
+                            local damageDecay = 0.8
 
-                            -- 链式闪电: 从被击中敌人开始, 逐个跳到最近敌人
-                            local hitSet = {[e] = true}  -- 记录已被闪电击中的敌人
-                            local currentSource = e
-                            local currentDmg = sDmg
-
-                            for bounce = 1, maxBounces do
-                                -- 搜索范围内最近的未被击中的存活敌人
-                                local nearest = nil
-                                local nearestDist = searchRange + 1
-                                for kk = 1, #G.enemies do
-                                    local et = G.enemies[kk]
-                                    if not hitSet[et] and et.hp > 0 then
-                                        local dx = et.x - currentSource.x
-                                        local dy = et.y - currentSource.y
-                                        local dist = math.sqrt(dx * dx + dy * dy)
-                                        if dist <= searchRange and dist < nearestDist then
-                                            nearest = et
-                                            nearestDist = dist
-                                        end
-                                    end
-                                end
-
-                                if not nearest then break end  -- 没有可跳跃的目标, 链断裂
-
-                                -- 对目标造成伤害
-                                hitSet[nearest] = true
-                                local aDmg = math.floor(currentDmg)
-                                if nearest.armor and nearest.armor > 0 then
-                                    aDmg = math.max(1, math.floor(aDmg * (1 - nearest.armor)))
-                                end
-                                nearest.hp = nearest.hp - aDmg
-                                nearest.hitFlashTimer = 0.15
-
-                                -- 闪电伤害数字
-                                table.insert(G.damageNumbers, {
-                                    x = nearest.x, y = nearest.y - nearest.radius - 5,
-                                    text = tostring(aDmg),
-                                    life = 0.8, maxLife = 0.8, vy = -35,
-                                    isShock = true,
-                                })
-                                -- 闪电连线视觉(从源到目标)
-                                table.insert(G.lightningEffects, {
-                                    x1 = currentSource.x, y1 = currentSource.y,
-                                    x2 = nearest.x, y2 = nearest.y,
-                                    life = 0.25, maxLife = 0.25,
-                                })
-                                -- 电弧粒子
-                                for sp = 1, 4 do
-                                    local sAngle = math.random() * math.pi * 2
-                                    table.insert(G.particles, {
-                                        x = nearest.x, y = nearest.y,
-                                        vx = math.cos(sAngle) * 40, vy = math.sin(sAngle) * 40,
-                                        life = 0.15, maxLife = 0.15,
-                                        r = 100, g = 180, b = 255,
-                                        size = 2 + math.random() * 2, glow = true,
-                                    })
-                                end
-                                -- 感电击杀判定
-                                if nearest.hp <= 0 and not nearest.dead then
-                                    nearest.dead = true
-                                    G.killCount = G.killCount + 1
-                                    WM.OnEnemyKilled()
-                                    G.score = G.score + 50
-                                    for sp2 = 1, 10 do
-                                        local pa2 = math.random() * math.pi * 2
-                                        local spd2 = 60 + math.random() * 100
-                                        table.insert(G.particles, {
-                                            x = nearest.x, y = nearest.y,
-                                            vx = math.cos(pa2) * spd2, vy = math.sin(pa2) * spd2,
-                                            life = 0.3 + math.random() * 0.3, maxLife = 0.6,
-                                            r = 80, g = 160, b = 255,
-                                            size = 2 + math.random() * 2, glow = true,
-                                        })
-                                    end
-                                end
-
-                                -- 准备下一跳: 衰减伤害, 更新源
-                                currentDmg = currentDmg * damageDecay
-                                currentSource = nearest
-                            end
+                            -- 将整条链加入延迟队列，由 main.lua 逐跳执行
+                            table.insert(G.pendingChainLightning, {
+                                sourceX = e.x, sourceY = e.y,
+                                hitSet = {[e] = true},
+                                remainBounces = maxBounces,
+                                currentDmg = sDmg,
+                                searchRange = searchRange,
+                                damageDecay = damageDecay,
+                                timer = 0,           -- 第一跳立即执行
+                                delay = 0.08,        -- 每跳间隔
+                            })
 
                             -- 起始点电弧闪光
                             table.insert(G.particles, {
@@ -476,6 +412,7 @@ function Bullet.UpdateBullets(dt)
                         getFx().TriggerHitstop(G.HITSTOP_KILL)
                         G.PlaySfx(G.sndKill, 0.5)
                         G.PlaySfx(G.sndSplat, 0.4)
+                        G.PlaySfx(G.sndEnemyDeath, 0.35)
                         G.killCount = G.killCount + 1
                         WM.OnEnemyKilled()
                         G.score = G.score + 50
@@ -569,6 +506,7 @@ function Bullet.UpdateBullets(dt)
                         if G.player.shield >= incomingDmg then
                             G.player.shield = G.player.shield - incomingDmg
                             incomingDmg = 0
+                            G.PlaySfx(G.sndShieldAbsorb, 0.4)
                             -- 护盾吸收伤害数字(蓝色)
                             table.insert(G.damageNumbers, {
                                 x = G.player.x, y = G.player.y - G.player.radius - 5,
@@ -597,11 +535,13 @@ function Bullet.UpdateBullets(dt)
                                 isShield = true,
                             })
                             G.player.shield = 0
+                            G.PlaySfx(G.sndShieldBreak, 0.5)
                         end
                         G.player.shieldRegenDelay = 3.0  -- 被击后3秒才恢复护盾
                     end
                     if incomingDmg > 0 then
                         G.player.hp = G.player.hp - incomingDmg
+                        G.PlaySfx(G.sndPlayerHurt, 0.5)
                         -- 受伤闪红
                         table.insert(G.damageNumbers, {
                             x = G.player.x, y = G.player.y - G.player.radius - 5,
@@ -619,6 +559,7 @@ function Bullet.UpdateBullets(dt)
                         G.deathAnimTimer = 0
                         G.deathZoomStart = G.camZoom
                         G.deathSlowScale = 1.0
+                        G.PlaySfx(G.sndPlayerDeath, 0.6)
                     end
                 end
                 remove = true

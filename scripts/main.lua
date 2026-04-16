@@ -147,6 +147,53 @@ function Start()
     G.sndFootstep   = cache:GetResource("Sound", "audio/sfx/sfx_footstep.ogg")
     G.sndLevelClear = cache:GetResource("Sound", "audio/sfx/sfx_level_clear.ogg")
 
+    -- 战斗音效
+    G.sndMeleeSwing    = cache:GetResource("Sound", "audio/sfx/sfx_melee_swing.ogg")
+    G.sndMeleeHit      = cache:GetResource("Sound", "audio/sfx/sfx_melee_hit.ogg")
+    G.sndExplosion     = cache:GetResource("Sound", "audio/sfx/sfx_explosion.ogg")
+    G.sndBulletBounce  = cache:GetResource("Sound", "audio/sfx/sfx_bullet_bounce.ogg")
+    G.sndEnemyShoot    = cache:GetResource("Sound", "audio/sfx/sfx_enemy_shoot.ogg")
+    G.sndEnemyBurst    = cache:GetResource("Sound", "audio/sfx/sfx_enemy_burst.ogg")
+    G.sndEnemyShotgun  = cache:GetResource("Sound", "audio/sfx/sfx_enemy_shotgun.ogg")
+    G.sndEnemyDeath    = cache:GetResource("Sound", "audio/sfx/sfx_enemy_death.ogg")
+    G.sndDroneShoot    = cache:GetResource("Sound", "audio/sfx/sfx_drone_shoot.ogg")
+    G.sndChainLightning = cache:GetResource("Sound", "audio/sfx/sfx_chain_lightning.ogg")
+
+    -- 状态效果音效
+    G.sndFrostHit      = cache:GetResource("Sound", "audio/sfx/sfx_frost_hit.ogg")
+    G.sndBurnHit       = cache:GetResource("Sound", "audio/sfx/sfx_burn_hit.ogg")
+    G.sndShockHit      = cache:GetResource("Sound", "audio/sfx/sfx_shock_hit.ogg")
+
+    -- Boss/波次音效
+    G.sndBossAppear    = cache:GetResource("Sound", "audio/sfx/sfx_boss_appear.ogg")
+    G.sndBossPhase     = cache:GetResource("Sound", "audio/sfx/sfx_boss_phase.ogg")
+    G.sndBossDeath     = cache:GetResource("Sound", "audio/sfx/sfx_boss_death.ogg")
+    G.sndBossSummon    = cache:GetResource("Sound", "audio/sfx/sfx_boss_summon.ogg")
+    G.sndBossCharge    = cache:GetResource("Sound", "audio/sfx/sfx_boss_charge.ogg")
+    G.sndWaveStart     = cache:GetResource("Sound", "audio/sfx/sfx_wave_start.ogg")
+
+    -- 玩家事件音效
+    G.sndPlayerHurt    = cache:GetResource("Sound", "audio/sfx/sfx_player_hurt.ogg")
+    G.sndPlayerDeath   = cache:GetResource("Sound", "audio/sfx/sfx_player_death.ogg")
+    G.sndShieldAbsorb  = cache:GetResource("Sound", "audio/sfx/sfx_shield_absorb.ogg")
+    G.sndShieldBreak   = cache:GetResource("Sound", "audio/sfx/sfx_shield_break.ogg")
+
+    -- 背包/物品音效
+    G.sndInventoryOpen  = cache:GetResource("Sound", "audio/sfx/sfx_inventory_open.ogg")
+    G.sndInventoryClose = cache:GetResource("Sound", "audio/sfx/sfx_inventory_close.ogg")
+    G.sndItemPickup     = cache:GetResource("Sound", "audio/sfx/sfx_item_pickup.ogg")
+    G.sndItemPlace      = cache:GetResource("Sound", "audio/sfx/sfx_item_place.ogg")
+    G.sndItemRotate     = cache:GetResource("Sound", "audio/sfx/sfx_item_rotate.ogg")
+    G.sndLineClear      = cache:GetResource("Sound", "audio/sfx/sfx_line_clear.ogg")
+    G.sndItemDiscard    = cache:GetResource("Sound", "audio/sfx/sfx_item_discard.ogg")
+
+    -- 世界事件音效
+    G.sndCrateSearch    = cache:GetResource("Sound", "audio/sfx/sfx_crate_search.ogg")
+    G.sndCrateOpen      = cache:GetResource("Sound", "audio/sfx/sfx_crate_open.ogg")
+    G.sndPortalAppear   = cache:GetResource("Sound", "audio/sfx/sfx_portal_appear.ogg")
+    G.sndPortalEnter    = cache:GetResource("Sound", "audio/sfx/sfx_portal_enter.ogg")
+    G.sndRewardSelect   = cache:GetResource("Sound", "audio/sfx/sfx_reward_select.ogg")
+
     -- 初始化背包系统
     Inv.Init()
     local starterArtifact = Inv.CreateArtifact("a_bullet_core")
@@ -289,6 +336,7 @@ function HandleRewardClick()
 
     -- 开始过渡动画
     WM.StartTransition()
+    G.PlaySfx(G.sndRewardSelect, 0.5)
     WM.transitCallback = function()
         G.camZoom = 1.3
         Map.GenerateMap()
@@ -297,6 +345,11 @@ function HandleRewardClick()
         if newWave then
             G.waveAnnounceTimer = 3.0
             G.waveAnnounceText = "Wave " .. WM.currentWave .. " - " .. newWave.name
+            if newWave.type == "boss" then
+                G.PlaySfx(G.sndBossAppear, 0.6)
+            else
+                G.PlaySfx(G.sndWaveStart, 0.5)
+            end
         end
     end
 end
@@ -353,8 +406,10 @@ function HandleKeyDown(eventType, eventData)
         if InvUI.isOpen then
             G.gameTimeScale = 0.15
             UI_CollectNearbyPickups()
+            G.PlaySfx(G.sndInventoryOpen, 0.5)
         else
             G.gameTimeScale = 1.0
+            G.PlaySfx(G.sndInventoryClose, 0.4)
         end
         return
     end
@@ -441,6 +496,7 @@ function UpdateSearch(dt)
                 end
             end
 
+            G.PlaySfx(G.sndCrateOpen, 0.5)
             local scoreMap = {[G.TILE_CRATE_WOOD] = 20, [G.TILE_CRATE_IRON] = 40, [G.TILE_CRATE_GOLD] = 80}
             G.score = G.score + (scoreMap[G.searchingCrate.crateType] or 20)
             G.searchingCrate = nil
@@ -452,6 +508,7 @@ function UpdateSearch(dt)
                 local cfg = G.CRATE_CONFIG[tile] or G.CRATE_CONFIG[G.TILE_CRATE_WOOD]
                 G.searchingCrate = {col = pc, row = pr, timer = cfg.searchTime,
                     crateType = tile, searchTime = cfg.searchTime}
+                G.PlaySfx(G.sndCrateSearch, 0.4)
             end
         end
     end
@@ -480,6 +537,7 @@ function UpdateSearch(dt)
                     vy = -30,
                 })
             end
+            G.PlaySfx(G.sndItemPickup, 0.4)
             table.remove(G.lootItems, i)
         end
     end
@@ -645,6 +703,7 @@ function HandleUpdate(eventType, eventData)
                     local effectiveMaxHp = player.maxHp + Inv.GetStat("maxHp", 0)
                     player.hp = math.min(effectiveMaxHp, player.hp + item.amount)
                 end
+                G.PlaySfx(G.sndItemPickup, 0.4)
                 table.remove(G.lootItems, i)
             end
         end
@@ -660,6 +719,7 @@ function HandleUpdate(eventType, eventData)
             G.walkoutTargetY = WM.exitY
             G.walkoutZoomStart = G.camZoom
             G.walkoutZoomEnd = math.min(1.0, G.camZoom + 0.15)
+            G.PlaySfx(G.sndPortalEnter, 0.5)
             G.PlaySfx(G.sndLevelClear, 0.6)
         end
         return
@@ -734,8 +794,10 @@ function HandleUpdate(eventType, eventData)
         local summoned, chargeImpact, spinBullets = WM.UpdateBossBehavior(WM.boss, dt, player.x, player.y)
         if summoned then
             Enemy.SpawnBossMinions(summoned.count)
+            G.PlaySfx(G.sndBossSummon, 0.5)
         end
         if chargeImpact then
+            G.PlaySfx(G.sndBossCharge, 0.5)
             local cdx = player.x - chargeImpact.x
             local cdy = player.y - chargeImpact.y
             local cdist = math.sqrt(cdx * cdx + cdy * cdy)
@@ -755,6 +817,7 @@ function HandleUpdate(eventType, eventData)
                     G.deathAnimTimer = 0
                     G.deathZoomStart = G.camZoom
                     G.deathSlowScale = 1.0
+                    G.PlaySfx(G.sndPlayerDeath, 0.6)
                 end
             end
             for kp = 1, 20 do
@@ -800,6 +863,7 @@ function HandleUpdate(eventType, eventData)
             G.gameState = G.STATE_VICTORY
         end
         G.PlaySfx(G.sndLevelClear, 0.6)
+        G.PlaySfx(G.sndWaveStart, 0.5)
     end
 
     -- 持续射击
@@ -890,14 +954,105 @@ function HandleUpdate(eventType, eventData)
                                 })
                             end
                             G.PlaySfx(G.sndKill, 0.5)
+                            G.PlaySfx(G.sndEnemyDeath, 0.35)
                         else
-                            G.PlaySfx(G.sndHit, 0.4)
+                            G.PlaySfx(G.sndMeleeHit, 0.4)
                         end
                     end
                 end
             end
             if not hitAny then
-                G.PlaySfx(G.sndHit, 0.2)
+                G.PlaySfx(G.sndMeleeHit, 0.2)
+            end
+        end
+    end
+
+    -- 链式闪电延迟队列更新（逐跳执行）
+    for ci = #G.pendingChainLightning, 1, -1 do
+        local chain = G.pendingChainLightning[ci]
+        chain.timer = chain.timer - dt
+        if chain.timer <= 0 and chain.remainBounces > 0 then
+            -- 执行一跳
+            local nearest = nil
+            local nearestDist = chain.searchRange + 1
+            for kk = 1, #G.enemies do
+                local et = G.enemies[kk]
+                if not chain.hitSet[et] and et.hp > 0 then
+                    local dx = et.x - chain.sourceX
+                    local dy = et.y - chain.sourceY
+                    local dist = math.sqrt(dx * dx + dy * dy)
+                    if dist <= chain.searchRange and dist < nearestDist then
+                        nearest = et
+                        nearestDist = dist
+                    end
+                end
+            end
+
+            if not nearest then
+                -- 没有可跳跃的目标，链断裂
+                table.remove(G.pendingChainLightning, ci)
+            else
+                chain.hitSet[nearest] = true
+                local aDmg = math.floor(chain.currentDmg)
+                if nearest.armor and nearest.armor > 0 then
+                    aDmg = math.max(1, math.floor(aDmg * (1 - nearest.armor)))
+                end
+                nearest.hp = nearest.hp - aDmg
+                nearest.hitFlashTimer = 0.15
+
+                -- 伤害数字
+                table.insert(G.damageNumbers, {
+                    x = nearest.x, y = nearest.y - nearest.radius - 5,
+                    text = tostring(aDmg),
+                    life = 0.8, maxLife = 0.8, vy = -35,
+                    isShock = true,
+                })
+                -- 闪电连线视觉
+                table.insert(G.lightningEffects, {
+                    x1 = chain.sourceX, y1 = chain.sourceY,
+                    x2 = nearest.x, y2 = nearest.y,
+                    life = 0.3, maxLife = 0.3,
+                })
+                -- 电弧粒子
+                for sp = 1, 4 do
+                    local sAngle = math.random() * math.pi * 2
+                    table.insert(G.particles, {
+                        x = nearest.x, y = nearest.y,
+                        vx = math.cos(sAngle) * 40, vy = math.sin(sAngle) * 40,
+                        life = 0.15, maxLife = 0.15,
+                        r = 100, g = 180, b = 255,
+                        size = 2 + math.random() * 2, glow = true,
+                    })
+                end
+                -- 击杀判定
+                if nearest.hp <= 0 and not nearest.dead then
+                    nearest.dead = true
+                    G.killCount = G.killCount + 1
+                    WM.OnEnemyKilled()
+                    G.score = G.score + 50
+                    for sp2 = 1, 10 do
+                        local pa2 = math.random() * math.pi * 2
+                        local spd2 = 60 + math.random() * 100
+                        table.insert(G.particles, {
+                            x = nearest.x, y = nearest.y,
+                            vx = math.cos(pa2) * spd2, vy = math.sin(pa2) * spd2,
+                            life = 0.3 + math.random() * 0.3, maxLife = 0.6,
+                            r = 80, g = 160, b = 255,
+                            size = 2 + math.random() * 2, glow = true,
+                        })
+                    end
+                end
+
+                -- 准备下一跳
+                chain.currentDmg = chain.currentDmg * chain.damageDecay
+                chain.sourceX = nearest.x
+                chain.sourceY = nearest.y
+                chain.remainBounces = chain.remainBounces - 1
+                chain.timer = chain.delay
+
+                if chain.remainBounces <= 0 then
+                    table.remove(G.pendingChainLightning, ci)
+                end
             end
         end
     end
@@ -953,65 +1108,8 @@ function HandleNanoVGRender(eventType, eventData)
     RW.DrawDrones()
     RW.DrawParticles()
 
-    -- === 闪电连线特效 (内联, 依赖世界空间变换) ===
-    for _, le in ipairs(G.lightningEffects) do
-        local alpha = math.floor(255 * (le.life / le.maxLife))
-        local sx1 = (le.x1 - G.camX) * G.camZoom
-        local sy1 = (le.y1 - G.camY) * G.camZoom
-        local sx2 = (le.x2 - G.camX) * G.camZoom
-        local sy2 = (le.y2 - G.camY) * G.camZoom
-        local segments = 6
-        nvgBeginPath(vg)
-        nvgMoveTo(vg, sx1, sy1)
-        for seg = 1, segments - 1 do
-            local t = seg / segments
-            local mx = sx1 + (sx2 - sx1) * t + (math.random() - 0.5) * 12
-            local my = sy1 + (sy2 - sy1) * t + (math.random() - 0.5) * 12
-            nvgLineTo(vg, mx, my)
-        end
-        nvgLineTo(vg, sx2, sy2)
-        nvgStrokeColor(vg, nvgRGBA(120, 180, 255, alpha))
-        nvgStrokeWidth(vg, 2.5)
-        nvgStroke(vg)
-        nvgBeginPath(vg)
-        nvgMoveTo(vg, sx1, sy1)
-        for seg = 1, segments - 1 do
-            local t = seg / segments
-            local mx = sx1 + (sx2 - sx1) * t + (math.random() - 0.5) * 16
-            local my = sy1 + (sy2 - sy1) * t + (math.random() - 0.5) * 16
-            nvgLineTo(vg, mx, my)
-        end
-        nvgLineTo(vg, sx2, sy2)
-        nvgStrokeColor(vg, nvgRGBA(80, 140, 255, math.floor(alpha * 0.3)))
-        nvgStrokeWidth(vg, 6)
-        nvgStroke(vg)
-    end
-
-    -- === 玩家护盾光环 ===
-    if player.shield > 0 and player.shieldMax > 0 then
-        local px = (player.x - G.camX) * G.camZoom
-        local py = (player.y - G.camY) * G.camZoom
-        local shieldRatio = player.shield / player.shieldMax
-        local shieldAlpha = math.floor(60 + 120 * shieldRatio)
-        local shieldRadius = (player.radius + 6) * G.camZoom
-        nvgBeginPath(vg)
-        nvgCircle(vg, px, py, shieldRadius)
-        nvgStrokeColor(vg, nvgRGBA(80, 160, 255, shieldAlpha))
-        nvgStrokeWidth(vg, 2.0)
-        nvgStroke(vg)
-        local startAngle = -math.pi / 2
-        local endAngle = startAngle + math.pi * 2 * shieldRatio
-        nvgBeginPath(vg)
-        nvgArc(vg, px, py, shieldRadius + 2, startAngle, endAngle, NVG_CW)
-        nvgStrokeColor(vg, nvgRGBA(100, 200, 255, math.floor(shieldAlpha * 1.2)))
-        nvgStrokeWidth(vg, 3.0)
-        nvgStroke(vg)
-        nvgBeginPath(vg)
-        nvgCircle(vg, px, py, shieldRadius + 4)
-        nvgStrokeColor(vg, nvgRGBA(60, 140, 255, math.floor(shieldAlpha * 0.3)))
-        nvgStrokeWidth(vg, 5)
-        nvgStroke(vg)
-    end
+    RW.DrawLightningEffects()
+    RW.DrawShield()
 
     RW.DrawDamageNumbers()
     RW.DrawFogOfWar(DESIGN_W, DESIGN_H)

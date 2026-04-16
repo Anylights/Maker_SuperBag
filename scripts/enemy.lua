@@ -374,6 +374,7 @@ function Enemy.UpdateEnemies(dt)
                         life = 2.0,
                         trail = {},
                     })
+                    G.PlaySfx(G.sndEnemyShoot, 0.3)
 
                 elseif pattern == "burst" then
                     -- 三连发: 立即发射第一颗,后续通过 burstRemaining 计时
@@ -394,6 +395,7 @@ function Enemy.UpdateEnemies(dt)
                         life = 2.0,
                         trail = {},
                     })
+                    G.PlaySfx(G.sndEnemyBurst, 0.3)
 
                 elseif pattern == "shotgun" then
                     -- 散弹: 多颗弹丸扇形展开
@@ -416,12 +418,14 @@ function Enemy.UpdateEnemies(dt)
                             trail = {},
                         })
                     end
+                    G.PlaySfx(G.sndEnemyShotgun, 0.3)
 
                 elseif pattern == "melee" then
                     -- 近战攻击
                     if dist < e.attackRange + G.player.radius and G.player.invincibleTimer <= 0 then
                         G.player.hp = G.player.hp - e.damage
                         G.player.invincibleTimer = 0.5
+                        G.PlaySfx(G.sndPlayerHurt, 0.5)
                         table.insert(G.damageNumbers, {
                             x = G.player.x, y = G.player.y - G.player.radius - 5,
                             text = tostring(e.damage),
@@ -436,6 +440,7 @@ function Enemy.UpdateEnemies(dt)
                             G.deathAnimTimer = 0
                             G.deathZoomStart = G.camZoom
                             G.deathSlowScale = 1.0
+                            G.PlaySfx(G.sndPlayerDeath, 0.6)
                         end
                     end
                 end

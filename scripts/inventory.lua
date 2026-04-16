@@ -4,6 +4,7 @@
 -- ============================================================================
 
 local Data = require("inventory_data")
+local G = require("game_context")
 
 local Inv = {}
 
@@ -358,6 +359,7 @@ function Inv.UpdateCompletedLines()
             -- 新完成的行 → 触发动画
             if not oldRows[r] then
                 table.insert(Inv.lineAnims, {type = "row", index = r, progress = 0, done = false})
+                G.PlaySfx(G.sndLineClear, 0.5)
             end
         end
     end
@@ -376,6 +378,7 @@ function Inv.UpdateCompletedLines()
             -- 新完成的列 → 触发动画
             if not oldCols[c] then
                 table.insert(Inv.lineAnims, {type = "col", index = c, progress = 0, done = false})
+                G.PlaySfx(G.sndLineClear, 0.5)
             end
         end
     end

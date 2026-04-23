@@ -240,9 +240,34 @@ function Enemy.UpdateEnemies(dt)
         end
 
         -- === 状态效果 tick 处理 ===
-        -- 减速效果
+        -- 冰冻效果(完全静止 + 无法攻击)
+        local isFrozen = false
         local speedMult = 1.0
-        if e.slowTimer and e.slowTimer > 0 then
+        if e.frozenTimer and e.frozenTimer > 0 then
+            e.frozenTimer = e.frozenTimer - dt
+            isFrozen = true
+            speedMult = 0.0
+            -- 冰晶粒子特效(每帧小几率产生)
+            if math.random() < 0.25 then
+                local pa = math.random() * math.pi * 2
+                local pr = e.radius * (0.6 + math.random() * 0.6)
+                table.insert(G.particles, {
+                    x = e.x + math.cos(pa) * pr,
+                    y = e.y + math.sin(pa) * pr,
+                    vx = math.cos(pa) * (5 + math.random() * 8),
+                    vy = math.sin(pa) * (5 + math.random() * 8) - 8,
+                    life = 0.4 + math.random() * 0.3, maxLife = 0.7,
+                    r = 160, g = 220, b = 255,
+                    size = 1.5 + math.random() * 1.5, glow = true,
+                })
+            end
+            if e.frozenTimer <= 0 then
+                e.frozenTimer = nil
+                isFrozen = false
+            end
+        end
+        -- 减速效果(未冰冻时生效)
+        if not isFrozen and e.slowTimer and e.slowTimer > 0 then
             e.slowTimer = e.slowTimer - dt
             speedMult = 1.0 - (e.slowPercent or 0)
             if e.slowTimer <= 0 then
@@ -328,8 +353,8 @@ function Enemy.UpdateEnemies(dt)
             end
         end
 
-        -- burst 连发处理(已触发的连发必须完成,独立于攻击状态)
-        if e.burstRemaining and e.burstRemaining > 0 then
+        -- burst 连发处理(冰冻时暂停)
+        if not isFrozen and e.burstRemaining and e.burstRemaining > 0 then
             e.burstTimer = e.burstTimer - dt
             if e.burstTimer <= 0 then
                 e.burstTimer = e.burstInterval
@@ -351,8 +376,8 @@ function Enemy.UpdateEnemies(dt)
             end
         end
 
-        -- 攻击
-        if e.state == "attack" then
+        -- 攻击(冰冻时完全禁止攻击，火力计时器也暂停)
+        if e.state == "attack" and not isFrozen then
             e.fireTimer = e.fireTimer - dt
             if e.fireTimer <= 0 and (not e.burstRemaining or e.burstRemaining <= 0) then
                 e.fireTimer = e.attackRate
@@ -422,7 +447,7 @@ function Enemy.UpdateEnemies(dt)
 
                 elseif pattern == "melee" then
                     -- 近战攻击
-                    if dist < e.attackRange + G.player.radius and G.player.invincibleTimer <= 0 then
+                    if dist < e.attackRange + G.player.radius and G.player.invincibleTimer <= 0 and not (G.player.dashTimer > 0) then
                         G.player.hp = G.player.hp - e.damage
                         G.player.invincibleTimer = 0.5
                         G.PlaySfx(G.sndPlayerHurt, 0.5)

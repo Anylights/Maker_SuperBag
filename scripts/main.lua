@@ -24,12 +24,22 @@ local Bullet = require("bullet")
 local Combat = require("combat")
 local RW     = require("render_world")
 local RH     = require("render_hud")
+local MI     = require("mobile_input")
+local Comic    = require("comic_intro")
+local Title    = require("title_screen")
+local Tutorial = require("tutorial")
+local BGM      = require("bgm")
 
 -- 常量别名(不可变, 仅本文件使用)
 local TILE_SIZE   = G.TILE_SIZE
 local DESIGN_W    = G.DESIGN_W
 local DESIGN_H    = G.DESIGN_H
 local WEAPON      = G.WEAPON
+
+-- 冲刺参数
+local DASH_DURATION = 0.18   -- 冲刺时长(秒)
+local DASH_SPEED    = 680    -- 冲刺速度(像素/秒)
+local DASH_COOLDOWN = 2.0    -- 冷却时间(秒)
 
 -- ============================================================================
 -- 入口
@@ -235,14 +245,136 @@ function Start()
     G.waveAnnounceText = "Wave " .. WM.currentWave .. " - " .. (w1 and w1.name or "")
 
     print("=== 小狼救红帽 - 森林冒险模式 ===")
-    print("WASD移动, 鼠标瞄准, 左键射击, R换弹")
+
+    -- 输入初始化（始终初始化，自动检测设备类型）
+    -- 默认PC模式(G.isMobile=false)；手机浏览器第一次触摸时自动切换为移动端模式
+    MI.Init()
+    MI.onReload = function()
+        local p = G.player
+        local effectiveMag = WEAPON.magSize + WM.weaponMods.bonusMagSize + math.floor(Inv.GetStat("magSize", 0))
+        if G.gameState == G.STATE_PLAYING and p.alive and not p.reloading
+           and p.ammo < effectiveMag and p.totalAmmo > 0 then
+            p.reloading = true
+            p.reloadTimer = WEAPON.reloadTime
+            G.PlaySfx(G.sndReload, 0.5)
+        end
+    end
+    MI.onBag = function()
+        if G.gameState == G.STATE_PLAYING and G.player.alive then
+            InvUI.Toggle()
+            if InvUI.isOpen then
+                G.gameTimeScale = 0.15
+                UI_CollectNearbyPickups()
+                G.PlaySfx(G.sndInventoryOpen, 0.5)
+            else
+                G.gameTimeScale = 1.0
+                G.PlaySfx(G.sndInventoryClose, 0.4)
+            end
+        end
+    end
+    MI.onPickup = function()
+        if G.gameState == G.STATE_PLAYING and G.player.alive and not InvUI.isOpen then
+            local nearby = GetNearbyArtifactLoot(60)
+            if #nearby > 0 then
+                InvUI.Open()
+                G.gameTimeScale = 0.15
+                UI_CollectNearbyPickups()
+            end
+        end
+    end
+    MI.onDash = function()
+        TryDash()
+    end
+    print("输入模式: 自动检测 (PC=WASD+鼠标 / 手机=触控摇杆)")
     print("消灭所有敌人进入下一波!")
+
+    -- 初始化开场漫画并设置初始游戏状态
+    Comic.Init(G.vg)
+    G.gameState = G.STATE_COMIC
 
     SubscribeToEvent(G.vg, "NanoVGRender", "HandleNanoVGRender")
     SubscribeToEvent("Update", "HandleUpdate")
     SubscribeToEvent("MouseButtonDown", "HandleMouseDown")
     SubscribeToEvent("MouseButtonUp", "HandleMouseUp")
     SubscribeToEvent("KeyDown", "HandleKeyDown")
+    -- 始终订阅触控事件（PC浏览器不会触发，手机自动激活）
+    SubscribeToEvent("TouchBegin", "HandleTouchBeginUI")
+
+    -- 初始化背景音乐（开场漫画/标题界面均播放标题曲）
+    BGM.Init()
+    BGM.PlayTitle()
+end
+
+-- 移动端触控 UI 层（奖励点击、结束重启）
+function HandleTouchBeginUI(eventType, eventData)
+    local px = eventData["X"]:GetInt()
+    local py = eventData["Y"]:GetInt()
+    local mx, my = G.ScreenToDesign(px, py)
+
+    -- 漫画阶段: 触摸翻页
+    if G.gameState == G.STATE_COMIC and Comic.active then
+        Comic.NextPage()
+        if Comic.finished then
+            G.gameState = G.STATE_TITLE
+            Title.Init(G.vg)
+        end
+        return
+    end
+
+    -- 标题页面: 触摸交互
+    if G.gameState == G.STATE_TITLE and Title.active then
+        Title.HandleTouch(mx, my)
+        if Title.finished then
+            G.gameState = G.STATE_PLAYING
+            Tutorial.Init()
+            BGM.PlayForWave(WM.currentWave, WM.GetWaveCount())
+        end
+        return
+    end
+
+    -- 游戏结束/胜利: 点击任意处重启
+    if G.gameState == G.STATE_GAMEOVER or G.gameState == G.STATE_EXTRACTED or G.gameState == G.STATE_VICTORY then
+        RestartGame()
+        return
+    end
+
+    if G.gameState ~= G.STATE_PLAYING then return end
+
+    -- 教程提示: 必须点击 banner 才能继续；点击别处也消费输入（不触发游戏动作）
+    if Tutorial.currentTip then
+        if Tutorial.IsPointOnBanner(mx, my) then
+            Tutorial.Dismiss()
+        end
+        return
+    end
+
+    -- 奖励选择阶段
+    if WM.phase == WM.PHASE_REWARD then
+        local wave = WM.GetCurrentWave()
+        local isSupply = (wave and wave.rewardType == "supply")
+        if isSupply then
+            HandleRewardClick()
+        else
+            local choices = WM.rewardChoices
+            local cardCount = #choices
+            if cardCount > 0 then
+                local cardW = 140
+                local cardH = 170
+                local gap = 20
+                local totalW = cardCount * cardW + (cardCount - 1) * gap
+                local startX = (DESIGN_W - totalW) / 2
+                local cardY = (DESIGN_H - cardH) / 2 + 10
+                for i = 1, cardCount do
+                    local cx = startX + (i - 1) * (cardW + gap)
+                    if mx >= cx and mx <= cx + cardW and my >= cardY and my <= cardY + cardH then
+                        WM.selectedReward = i
+                        HandleRewardClick()
+                        return
+                    end
+                end
+            end
+        end
+    end
 end
 
 function Stop()
@@ -253,11 +385,132 @@ function Stop()
 end
 
 -- ============================================================================
+-- 冲刺位置更新（每帧调用，无论 phase 如何，都要把进行中的冲刺推进完毕）
+-- ============================================================================
+function UpdateDash(dt)
+    local player = G.player
+    if player.dashTimer <= 0 then return end
+
+    player.dashTimer = player.dashTimer - dt
+    local startX, startY = player.x, player.y
+
+    -- 分轴推进：避免对角冲刺撞到墙角时被同时锁死两个轴
+    local stepX = player.dashDirX * DASH_SPEED * dt
+    if math.abs(stepX) > 0.001 then
+        local resX, _ = Map.ResolveWallCollision(player.x + stepX, player.y, player.radius)
+        resX = math.max(player.radius, math.min(G.MAP_W - player.radius, resX))
+        if math.abs(resX - (player.x + stepX)) > 0.5 then
+            player.dashDirX = 0
+        end
+        player.x = resX
+    end
+    local stepY = player.dashDirY * DASH_SPEED * dt
+    if math.abs(stepY) > 0.001 then
+        local _, resY = Map.ResolveWallCollision(player.x, player.y + stepY, player.radius)
+        resY = math.max(player.radius, math.min(G.MAP_H - player.radius, resY))
+        if math.abs(resY - (player.y + stepY)) > 0.5 then
+            player.dashDirY = 0
+        end
+        player.y = resY
+    end
+
+    -- 任何一帧"几乎没移动"就立即终止冲刺，避免卡墙
+    local moved = math.abs(player.x - startX) + math.abs(player.y - startY)
+    if moved < 0.5 then
+        player.dashTimer = 0
+        player.dashDirX, player.dashDirY = 0, 0
+        player.dashCooldown = DASH_COOLDOWN
+    end
+
+    -- 冲刺拖影粒子
+    if player.dashTimer > 0 and math.random() < 0.85 then
+        table.insert(G.particles, {
+            x = player.x + (math.random() - 0.5) * 8,
+            y = player.y + (math.random() - 0.5) * 8,
+            vx = -player.dashDirX * 40 + (math.random() - 0.5) * 20,
+            vy = -player.dashDirY * 40 + (math.random() - 0.5) * 20,
+            life = 0.18, maxLife = 0.18,
+            r = 200, g = 220, b = 255,
+            size = 4 + math.random() * 3,
+        })
+    end
+
+    if player.dashTimer <= 0 then
+        player.dashTimer   = 0
+        player.dashCooldown = DASH_COOLDOWN
+    end
+end
+
+-- ============================================================================
+-- 冲刺
+-- ============================================================================
+function TryDash()
+    local player = G.player
+    if not player.alive then return end
+    if player.dashTimer > 0 then return end      -- 冲刺进行中
+    if player.dashCooldown > 0 then return end   -- 冷却中
+    if G.gameState ~= G.STATE_PLAYING then return end
+    if WM.phase == WM.PHASE_REWARD then return end
+    if InvUI.isOpen then return end
+
+    -- 计算冲刺方向
+    local ddx, ddy
+    if G.isMobile then
+        if math.abs(MI.moveDX) > 0.1 or math.abs(MI.moveDY) > 0.1 then
+            ddx, ddy = MI.moveDX, MI.moveDY
+        else
+            ddx = math.cos(player.angle)
+            ddy = math.sin(player.angle)
+        end
+    else
+        ddx = math.cos(player.angle)
+        ddy = math.sin(player.angle)
+    end
+
+    local len = math.sqrt(ddx * ddx + ddy * ddy)
+    if len < 0.001 then return end
+    ddx = ddx / len
+    ddy = ddy / len
+
+    player.dashTimer    = DASH_DURATION
+    player.dashDirX     = ddx
+    player.dashDirY     = ddy
+    -- 冲刺期间无敌（多留0.05s buffer）
+    player.invincibleTimer = math.max(player.invincibleTimer, DASH_DURATION + 0.05)
+
+    G.PlaySfx(G.sndMeleeSwing, 0.5)
+end
+
+-- ============================================================================
 -- 输入处理
 -- ============================================================================
 function HandleMouseDown(eventType, eventData)
     local button = eventData["Button"]:GetInt()
     local player = G.player
+
+    -- 漫画阶段: 点击翻页
+    if G.gameState == G.STATE_COMIC and Comic.active then
+        if button == MOUSEB_LEFT then
+            Comic.NextPage()
+            if Comic.finished then
+                G.gameState = G.STATE_TITLE
+                Title.Init(G.vg)
+            end
+        end
+        return
+    end
+
+    -- 标题页面: 鼠标点击
+    if G.gameState == G.STATE_TITLE and Title.active then
+        local mx, my = G.ScreenToDesign(input:GetMousePosition().x, input:GetMousePosition().y)
+        Title.HandleMouseDown(mx, my, button)
+        if Title.finished then
+            G.gameState = G.STATE_PLAYING
+            Tutorial.Init()
+            BGM.PlayForWave(WM.currentWave, WM.GetWaveCount())
+        end
+        return
+    end
 
     if G.gameState == G.STATE_GAMEOVER or G.gameState == G.STATE_EXTRACTED or G.gameState == G.STATE_VICTORY then
         RestartGame()
@@ -265,6 +518,15 @@ function HandleMouseDown(eventType, eventData)
     end
 
     if G.gameState ~= G.STATE_PLAYING then return end
+
+    -- 教程提示: 必须点击 banner 才能继续；点击别处也消费输入（不触发游戏动作）
+    if Tutorial.currentTip then
+        local mx, my = G.ScreenToDesign(input:GetMousePosition().x, input:GetMousePosition().y)
+        if button == MOUSEB_LEFT and Tutorial.IsPointOnBanner(mx, my) then
+            Tutorial.Dismiss()
+        end
+        return
+    end
 
     -- 奖励选择阶段
     if WM.phase == WM.PHASE_REWARD and button == MOUSEB_LEFT then
@@ -298,7 +560,7 @@ function HandleMouseDown(eventType, eventData)
 
     if not player.alive then return end
 
-    -- 背包UI优先处理输入
+    -- 背包UI优先处理输入（非移动端或移动端也通过此路径处理鼠标）
     if InvUI.isOpen then
         local mx, my = G.ScreenToDesign(input:GetMousePosition().x, input:GetMousePosition().y)
         if InvUI.HandleMouseDown(mx, my, button) then
@@ -306,15 +568,28 @@ function HandleMouseDown(eventType, eventData)
         end
     end
 
-    if button == MOUSEB_LEFT then
+    -- 移动端射击由摇杆处理，不走鼠标路径
+    if not G.isMobile and button == MOUSEB_LEFT then
         if WM.phase ~= WM.PHASE_WALKOUT then
             Combat.TryShoot()
         end
+    end
+
+    -- 右键冲刺（PC 端）
+    if not G.isMobile and button == MOUSEB_RIGHT then
+        TryDash()
     end
 end
 
 function HandleMouseUp(eventType, eventData)
     local button = eventData["Button"]:GetInt()
+
+    -- 标题页面: 鼠标释放（滑条拖拽结束）
+    if G.gameState == G.STATE_TITLE and Title.active then
+        local mx, my = G.ScreenToDesign(input:GetMousePosition().x, input:GetMousePosition().y)
+        Title.HandleMouseUp(mx, my, button)
+        return
+    end
 
     if InvUI.isOpen then
         local mx, my = G.ScreenToDesign(input:GetMousePosition().x, input:GetMousePosition().y)
@@ -388,6 +663,41 @@ function HandleKeyDown(eventType, eventData)
     local key = eventData["Key"]:GetInt()
     local player = G.player
 
+    -- 漫画阶段: Esc跳过, 空格/回车翻页
+    if G.gameState == G.STATE_COMIC and Comic.active then
+        if key == KEY_ESCAPE then
+            Comic.Skip()
+            G.gameState = G.STATE_TITLE
+            Title.Init(G.vg)
+            return
+        end
+        if key == KEY_SPACE or key == KEY_RETURN then
+            Comic.NextPage()
+            if Comic.finished then
+                G.gameState = G.STATE_TITLE
+                Title.Init(G.vg)
+            end
+            return
+        end
+        return
+    end
+
+    -- 标题页面: 按键处理
+    if G.gameState == G.STATE_TITLE and Title.active then
+        Title.HandleKeyDown(key)
+        if Title.finished then
+            G.gameState = G.STATE_PLAYING
+            Tutorial.Init()
+            BGM.PlayForWave(WM.currentWave, WM.GetWaveCount())
+        end
+        return
+    end
+
+    -- 教程提示显示中：拦截所有按键（必须点击 banner 才能继续）
+    if G.gameState == G.STATE_PLAYING and Tutorial.currentTip then
+        return
+    end
+
     -- 奖励选择阶段: 数字键快捷选择
     if WM.phase == WM.PHASE_REWARD and G.gameState == G.STATE_PLAYING then
         local numChoices = #WM.rewardChoices
@@ -433,7 +743,8 @@ function HandleKeyDown(eventType, eventData)
     end
 
     if key == KEY_R and G.gameState == G.STATE_PLAYING then
-        if not player.reloading and player.ammo < WEAPON.magSize and player.totalAmmo > 0 then
+        local effectiveMag = WEAPON.magSize + WM.weaponMods.bonusMagSize + math.floor(Inv.GetStat("magSize", 0))
+        if not player.reloading and player.ammo < effectiveMag and player.totalAmmo > 0 then
             player.reloading = true
             player.reloadTimer = WEAPON.reloadTime
             G.PlaySfx(G.sndReload, 0.5)
@@ -565,8 +876,9 @@ function RestartGame()
     player.y = 0
     player.hp = 100
     player.maxHp = 100
+    player.speed = 180
     player.ammo = 12
-    player.totalAmmo = 60
+    player.totalAmmo = 150
     player.alive = true
     player.reloading = false
     player.reloadTimer = 0
@@ -575,6 +887,14 @@ function RestartGame()
     player.meleeTimer = 0
     player.meleeSwingTimer = 0
     player.meleeHitDone = false
+    player.shield = 0
+    player.shieldMax = 0
+    player.shieldRegen = 0
+    player.shieldRegenDelay = 0
+    player.dashTimer    = 0
+    player.dashCooldown = 0
+    player.dashDirX     = 0
+    player.dashDirY     = 0
 
     G.bullets = {}
     G.enemies = {}
@@ -617,6 +937,9 @@ function RestartGame()
     local w1 = WM.GetCurrentWave()
     G.waveAnnounceTimer = 3.0
     G.waveAnnounceText = "Wave 1 - " .. (w1 and w1.name or "")
+
+    -- 重启游戏：重新按当前波次播放对应 BGM
+    BGM.PlayForWave(WM.currentWave, WM.GetWaveCount())
 end
 
 -- ============================================================================
@@ -625,6 +948,32 @@ end
 function HandleUpdate(eventType, eventData)
     local rawDt = eventData["TimeStep"]:GetFloat()
     local player = G.player
+
+    -- BGM 循环兜底（每帧检查，确保曲目结束后自动重启）
+    BGM.Update()
+
+    -- 漫画开场更新
+    if G.gameState == G.STATE_COMIC then
+        Comic.Update(rawDt)
+        if Comic.finished then
+            G.gameState = G.STATE_TITLE
+            Title.Init(G.vg)
+        end
+        return
+    end
+
+    -- 标题页面更新
+    if G.gameState == G.STATE_TITLE then
+        Title.Update(rawDt)
+        -- 鼠标移动处理（悬停+滑条拖拽）
+        local pmx, pmy = G.ScreenToDesign(input:GetMousePosition().x, input:GetMousePosition().y)
+        Title.HandleMouseMove(pmx, pmy)
+        if Title.finished then
+            G.gameState = G.STATE_PLAYING
+            BGM.PlayForWave(WM.currentWave, WM.GetWaveCount())
+        end
+        return
+    end
 
     -- 死亡电影化效果更新
     if G.gameState == G.STATE_DYING then
@@ -646,6 +995,39 @@ function HandleUpdate(eventType, eventData)
 
     if G.gameState ~= G.STATE_PLAYING then return end
 
+    -- 波次变化时同步切换 BGM（最后一波 → boss.ogg；其他 → 2~5.ogg 循环）
+    if G.lastBgmWave ~= WM.currentWave then
+        BGM.PlayForWave(WM.currentWave, WM.GetWaveCount())
+        G.lastBgmWave = WM.currentWave
+    end
+
+    -- 情境式教程：检测触发条件 + 更新动画
+    Tutorial.CheckTriggers()
+    Tutorial.Update(rawDt)
+
+    -- 教程显示中：暂停所有游戏逻辑（仅相机继续更新以保持画面平滑）
+    if Tutorial.IsBlocking() then
+        UpdateCamera()
+        return
+    end
+
+    -- 冲刺冷却倒计时（放在所有 phase 分支之前，保证任何阶段都递减）
+    if player.dashCooldown > 0 then
+        player.dashCooldown = player.dashCooldown - rawDt
+        if player.dashCooldown < 0 then player.dashCooldown = 0 end
+    end
+
+    -- 近战计时器在所有 phase 分支前递减（避免奖励/出口/走出/清除等阶段卡住玩家挥砍）
+    -- 注意：dashTimer 不在此处递减，由后面的"冲刺位置更新"统一处理（包含位置推进 + 计时）
+    if player.meleeTimer and player.meleeTimer > 0 then
+        player.meleeTimer = player.meleeTimer - rawDt
+        if player.meleeTimer < 0 then player.meleeTimer = 0 end
+    end
+    if player.meleeSwingTimer and player.meleeSwingTimer > 0 then
+        player.meleeSwingTimer = player.meleeSwingTimer - rawDt
+        if player.meleeSwingTimer < 0 then player.meleeSwingTimer = 0 end
+    end
+
     local dt = rawDt * G.gameTimeScale
     G.gameTimeAcc = G.gameTimeAcc + rawDt
     local g = GetGraphics()
@@ -659,16 +1041,18 @@ function HandleUpdate(eventType, eventData)
         G.waveAnnounceTimer = G.waveAnnounceTimer - rawDt
     end
 
-    -- 过渡中: 只更新粒子和相机
+    -- 过渡中: 只更新粒子和相机（仍要把进行中的冲刺推进完）
     if WM.transitPhase ~= "none" then
+        UpdateDash(dt)
         Fx.UpdateParticles(dt)
         Fx.UpdateShake(dt)
         UpdateCamera()
         return
     end
 
-    -- 奖励阶段: 暂停战斗
+    -- 奖励阶段: 暂停战斗（但仍要把进行中的冲刺推进完）
     if WM.phase == WM.PHASE_REWARD then
+        UpdateDash(dt)
         Fx.UpdateParticles(dt)
         UpdateCamera()
         return
@@ -680,6 +1064,7 @@ function HandleUpdate(eventType, eventData)
             Map.SpawnExit()
         end
 
+        UpdateDash(dt)
         Combat.UpdatePlayer(dt)
         Bullet.UpdateBullets(dt)
         UpdateSearch(dt)
@@ -687,8 +1072,12 @@ function HandleUpdate(eventType, eventData)
         Fx.UpdateDamageNumbers(dt)
         UpdateCamera()
 
-        if input:GetMouseButtonDown(MOUSEB_LEFT) and player.alive and not InvUI.isOpen then
-            Combat.TryShoot()
+        if player.alive and not InvUI.isOpen then
+            if G.isMobile then
+                if MI.isShooting then Combat.TryShoot() end
+            else
+                if input:GetMouseButtonDown(MOUSEB_LEFT) then Combat.TryShoot() end
+            end
         end
 
         -- 拾取掉落物(出口阶段残留)
@@ -779,6 +1168,9 @@ function HandleUpdate(eventType, eventData)
     -- 动态难度调整
     WM.UpdateDifficulty(player.hp / (player.maxHp + Inv.GetStat("maxHp", 0)))
 
+    -- 冲刺位置更新（在 Combat.UpdatePlayer 之前，覆盖普通移动）
+    UpdateDash(dt)
+
     Combat.UpdatePlayer(dt)
     Combat.UpdateDrones(dt)
     Bullet.UpdateBullets(dt)
@@ -801,7 +1193,7 @@ function HandleUpdate(eventType, eventData)
             local cdx = player.x - chargeImpact.x
             local cdy = player.y - chargeImpact.y
             local cdist = math.sqrt(cdx * cdx + cdy * cdy)
-            if cdist < chargeImpact.radius and player.invincibleTimer <= 0 then
+            if cdist < chargeImpact.radius and player.invincibleTimer <= 0 and not (player.dashTimer > 0) then
                 player.hp = player.hp - chargeImpact.damage
                 player.invincibleTimer = 0.5
                 table.insert(G.damageNumbers, {
@@ -867,8 +1259,12 @@ function HandleUpdate(eventType, eventData)
     end
 
     -- 持续射击
-    if input:GetMouseButtonDown(MOUSEB_LEFT) and player.alive and not InvUI.isOpen then
-        Combat.TryShoot()
+    if player.alive and not InvUI.isOpen then
+        if G.isMobile then
+            if MI.isShooting then Combat.TryShoot() end
+        else
+            if input:GetMouseButtonDown(MOUSEB_LEFT) then Combat.TryShoot() end
+        end
     end
 
     -- 生命回复
@@ -1087,6 +1483,20 @@ function HandleNanoVGRender(eventType, eventData)
 
     nvgBeginFrame(vg, G.screenW, G.screenH, 1.0)
 
+    -- 漫画开场: 独占渲染，跳过游戏画面
+    if G.gameState == G.STATE_COMIC and Comic.active then
+        Comic.Draw(vg, G.screenW, G.screenH)
+        nvgEndFrame(vg)
+        return
+    end
+
+    -- 标题页面: 独占渲染
+    if G.gameState == G.STATE_TITLE and Title.active then
+        Title.Draw(vg, G.screenW, G.screenH)
+        nvgEndFrame(vg)
+        return
+    end
+
     -- 深色森林填充整个屏幕(防止letterbox黑边)
     nvgBeginPath(vg)
     nvgRect(vg, 0, 0, G.screenW, G.screenH)
@@ -1278,6 +1688,24 @@ function HandleNanoVGRender(eventType, eventData)
         nvgTranslate(vg, G.renderOffsetX, G.renderOffsetY)
         nvgScale(vg, G.renderScale, G.renderScale)
         RH.DrawEndScreen(DESIGN_W, DESIGN_H)
+        nvgRestore(vg)
+    end
+
+    -- 新手教程提示
+    if Tutorial.currentTip then
+        nvgSave(vg)
+        nvgTranslate(vg, G.renderOffsetX, G.renderOffsetY)
+        nvgScale(vg, G.renderScale, G.renderScale)
+        Tutorial.Draw(vg, DESIGN_W, DESIGN_H)
+        nvgRestore(vg)
+    end
+
+    -- 移动端触控控件 (摇杆+按钮)
+    if G.isMobile and G.gameState == G.STATE_PLAYING then
+        nvgSave(vg)
+        nvgTranslate(vg, G.renderOffsetX, G.renderOffsetY)
+        nvgScale(vg, G.renderScale, G.renderScale)
+        MI.DrawControls(DESIGN_W, DESIGN_H)
         nvgRestore(vg)
     end
 

@@ -137,8 +137,8 @@ WM.WAVES = {
 -- ============================================================================
 WM.REWARD_POOL = {
     -- 每个奖励: {id, name, desc, apply}
-    { id = "ammo_pack",   name = "石弹补给",   desc = "+30 弹药",
-      icon = "ammo", apply = function(p) p.totalAmmo = p.totalAmmo + 30 end },
+    { id = "ammo_pack",   name = "石弹补给",   desc = "+80 弹药",
+      icon = "ammo", apply = function(p) p.totalAmmo = p.totalAmmo + 80 end },
     { id = "heal_kit",    name = "草药包",     desc = "回复 40 HP",
       icon = "health", apply = function(p) p.hp = math.min(p.maxHp, p.hp + 40) end },
     { id = "max_hp_up",   name = "狼族血脉",   desc = "最大HP +15",
@@ -151,8 +151,8 @@ WM.REWARD_POOL = {
       icon = "mag", apply = function(p) end },  -- 通过weapon modifier实现
     { id = "fire_rate",   name = "连射技巧",   desc = "射速提升",
       icon = "rate", apply = function(p) end },
-    { id = "full_ammo",   name = "弹药宝箱",   desc = "弹药全满",
-      icon = "ammo", apply = function(p) p.totalAmmo = p.totalAmmo + 60 end },
+    { id = "full_ammo",   name = "弹药宝箱",   desc = "+150 弹药",
+      icon = "ammo", apply = function(p) p.totalAmmo = p.totalAmmo + 150 end },
     { id = "full_heal",   name = "长老秘药",   desc = "HP全满",
       icon = "health", apply = function(p) p.hp = p.maxHp end },
 }
@@ -405,8 +405,8 @@ end
 function WM.GenerateSupplyReward()
     -- 补给: 固定给弹药+血
     WM.rewardChoices = {
-        { id = "supply_ammo", name = "石弹补给", desc = "+25 弹药",
-          icon = "ammo", apply = function(p) p.totalAmmo = p.totalAmmo + 25 end },
+        { id = "supply_ammo", name = "石弹补给", desc = "+70 弹药",
+          icon = "ammo", apply = function(p) p.totalAmmo = p.totalAmmo + 70 end },
         { id = "supply_heal", name = "森林草药", desc = "回复 30 HP",
           icon = "health", apply = function(p) p.hp = math.min(p.maxHp, p.hp + 30) end },
     }

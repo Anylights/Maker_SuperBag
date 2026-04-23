@@ -242,6 +242,44 @@ function RW.DrawPlayer()
         end
     end
 
+    -- 冲刺冷却弧（角色下方，缩小不重合）
+    local dashCooldown = player.dashCooldown or 0
+    local dashTimer    = player.dashTimer or 0
+    local dashArcR  = 6          -- 缩小半径
+    local dashArcY  = py + r + 14  -- 角色底部再往下，不与角色重叠
+    local dashLineW = 1.8
+    if dashCooldown > 0 then
+        -- progress: 0=刚进入冷却, 1=冷却完成
+        local progress = math.max(0, math.min(1, 1.0 - dashCooldown / 2.0))
+        local startA   = -math.pi / 2
+        local endA     = startA + progress * math.pi * 2
+
+        -- 背景轨道（暗灰）
+        nvgBeginPath(vg)
+        nvgArc(vg, px, dashArcY, dashArcR, 0, math.pi * 2, NVG_CW)
+        nvgStrokeColor(vg, nvgRGBA(255, 255, 255, 35))
+        nvgStrokeWidth(vg, dashLineW)
+        nvgStroke(vg)
+
+        -- 冷却进度（白色）
+        if progress > 0.01 then
+            nvgBeginPath(vg)
+            nvgArc(vg, px, dashArcY, dashArcR, startA, endA, NVG_CW)
+            nvgStrokeColor(vg, nvgRGBA(255, 255, 255, 210))
+            nvgStrokeWidth(vg, dashLineW)
+            nvgLineCap(vg, NVG_ROUND)
+            nvgStroke(vg)
+        end
+    elseif dashTimer > 0 then
+        -- 冲刺中：脚下蓝色小光圈闪烁
+        local pulse = 0.6 + 0.4 * math.sin(G.gameTimeAcc * 30)
+        nvgBeginPath(vg)
+        nvgArc(vg, px, dashArcY, dashArcR, 0, math.pi * 2, NVG_CW)
+        nvgStrokeColor(vg, nvgRGBA(180, 220, 255, math.floor(200 * pulse)))
+        nvgStrokeWidth(vg, dashLineW)
+        nvgStroke(vg)
+    end
+
     -- 近战挥击特效(序列帧动画)
     if player.meleeSwingTimer > 0 then
         local rawT = 1.0 - (player.meleeSwingTimer / player.meleeSwingDur)
@@ -339,6 +377,24 @@ function RW.DrawEnemies()
             nvgCircle(vg, e.x, e.y, e.radius + 2)
             nvgFillColor(vg, nvgRGBA(255, 255, 255, 120))
             nvgFill(vg)
+        end
+
+        -- 冰冻状态: 蓝色覆盖 + 脉冲光环
+        if e.frozenTimer and e.frozenTimer > 0 then
+            local fp = 0.65 + 0.35 * math.sin(gameTimeAcc * 8)
+            nvgBeginPath(vg)
+            nvgCircle(vg, e.x, e.y, e.radius + 4)
+            nvgFillColor(vg, nvgRGBA(100, 200, 255, math.floor(80 * fp)))
+            nvgFill(vg)
+            nvgBeginPath(vg)
+            nvgCircle(vg, e.x, e.y, e.radius)
+            nvgFillColor(vg, nvgRGBA(160, 220, 255, 60))
+            nvgFill(vg)
+            nvgBeginPath(vg)
+            nvgCircle(vg, e.x, e.y, e.radius + 5)
+            nvgStrokeColor(vg, nvgRGBA(120, 210, 255, math.floor(180 * fp)))
+            nvgStrokeWidth(vg, 2.0)
+            nvgStroke(vg)
         end
 
         -- Boss专属
@@ -953,6 +1009,33 @@ function RW.DrawLootItems()
             local col = InvData.RARITY_COLORS[rarity] or {200, 200, 200}
             local pulse = 0.7 + 0.3 * math.sin(t * 5 + item.y)
 
+            -- ===== 史诗/传奇: 底层大光晕 =====
+            if rarity >= 4 then
+                local auraPulse = 0.6 + 0.4 * math.sin(t * 3.5 + item.x)
+                local auraR = rarity == 5 and 28 or 20
+                local auraAlpha = rarity == 5 and 55 or 40
+                nvgBeginPath(vg)
+                nvgCircle(vg, item.x, item.y + bounce, auraR)
+                nvgFillColor(vg, nvgRGBA(col[1], col[2], col[3], math.floor(auraAlpha * auraPulse)))
+                nvgFill(vg)
+            end
+
+            -- ===== 传奇: 向上光柱 =====
+            if rarity >= 5 then
+                local beamAlpha = 30 + math.floor(20 * math.sin(t * 2.5))
+                local beamW = 6 + 2 * math.sin(t * 4)
+                nvgBeginPath(vg)
+                nvgRect(vg, item.x - beamW * 0.5, item.y + bounce - 80, beamW, 80)
+                local beamPaint = nvgLinearGradient(vg,
+                    item.x, item.y + bounce - 80,
+                    item.x, item.y + bounce,
+                    nvgRGBA(col[1], col[2], col[3], 0),
+                    nvgRGBA(col[1], col[2], col[3], beamAlpha))
+                nvgFillPaint(vg, beamPaint)
+                nvgFill(vg)
+            end
+
+            -- 基础三圆（所有稀有度）
             nvgBeginPath(vg)
             nvgCircle(vg, item.x, item.y + bounce, 14)
             nvgFillColor(vg, nvgRGBA(col[1], col[2], col[3], math.floor(35 * pulse)))
@@ -974,12 +1057,98 @@ function RW.DrawLootItems()
             nvgStrokeWidth(vg, 1.5)
             nvgStroke(vg)
 
-            -- 物品名称
+            -- ===== 史诗(4): 6颗旋转轨道粒子 =====
+            if rarity == 4 then
+                local orbitR = 13
+                local orbitSpd = t * 2.2
+                for ki = 1, 6 do
+                    local angle = orbitSpd + (ki / 6) * math.pi * 2
+                    local ox = item.x + math.cos(angle) * orbitR
+                    local oy = item.y + bounce + math.sin(angle) * orbitR * 0.5
+                    local sparkAlpha = 160 + math.floor(80 * math.sin(t * 5 + ki))
+                    nvgBeginPath(vg)
+                    nvgCircle(vg, ox, oy, 2)
+                    nvgFillColor(vg, nvgRGBA(col[1], col[2], col[3], sparkAlpha))
+                    nvgFill(vg)
+                end
+                -- 旋转光环描边
+                nvgBeginPath(vg)
+                nvgCircle(vg, item.x, item.y + bounce, 13)
+                nvgStrokeColor(vg, nvgRGBA(col[1], col[2], col[3], math.floor(60 + 40 * math.sin(t * 3))))
+                nvgStrokeWidth(vg, 1.0)
+                nvgStroke(vg)
+            end
+
+            -- ===== 传奇(5): 双轨道+旋转射线+厚重光环 =====
+            if rarity >= 5 then
+                -- 内轨6颗金色粒子
+                local innerSpd = t * 3.0
+                for ki = 1, 6 do
+                    local angle = innerSpd + (ki / 6) * math.pi * 2
+                    local ox = item.x + math.cos(angle) * 12
+                    local oy = item.y + bounce + math.sin(angle) * 6
+                    nvgBeginPath(vg)
+                    nvgCircle(vg, ox, oy, 2.5)
+                    nvgFillColor(vg, nvgRGBA(255, 240, 80, 220))
+                    nvgFill(vg)
+                end
+                -- 外轨8颗白色粒子(反向旋转)
+                local outerSpd = -t * 1.8
+                for ki = 1, 8 do
+                    local angle = outerSpd + (ki / 8) * math.pi * 2
+                    local ox = item.x + math.cos(angle) * 19
+                    local oy = item.y + bounce + math.sin(angle) * 8
+                    local sa = 120 + math.floor(80 * math.sin(t * 4 + ki * 1.1))
+                    nvgBeginPath(vg)
+                    nvgCircle(vg, ox, oy, 1.8)
+                    nvgFillColor(vg, nvgRGBA(255, 255, 200, sa))
+                    nvgFill(vg)
+                end
+                -- 4根旋转射线
+                local raySpd = t * 1.2
+                for ki = 1, 4 do
+                    local angle = raySpd + (ki / 4) * math.pi * 2
+                    local rx2 = item.x + math.cos(angle) * 22
+                    local ry2 = item.y + bounce + math.sin(angle) * 10
+                    nvgBeginPath(vg)
+                    nvgMoveTo(vg, item.x, item.y + bounce)
+                    nvgLineTo(vg, rx2, ry2)
+                    local rayAlpha = 40 + math.floor(30 * math.sin(t * 3 + ki))
+                    nvgStrokeColor(vg, nvgRGBA(col[1], col[2], col[3], rayAlpha))
+                    nvgStrokeWidth(vg, 1.5)
+                    nvgStroke(vg)
+                end
+                -- 厚重光环描边(双圈)
+                nvgBeginPath(vg)
+                nvgCircle(vg, item.x, item.y + bounce, 16)
+                nvgStrokeColor(vg, nvgRGBA(255, 220, 50, math.floor(120 + 60 * math.sin(t * 2.5))))
+                nvgStrokeWidth(vg, 2.0)
+                nvgStroke(vg)
+                nvgBeginPath(vg)
+                nvgCircle(vg, item.x, item.y + bounce, 20)
+                nvgStrokeColor(vg, nvgRGBA(255, 180, 20, math.floor(50 + 30 * math.sin(t * 3.5 + 1))))
+                nvgStrokeWidth(vg, 1.0)
+                nvgStroke(vg)
+            end
+
+            -- 物品名称（史诗/传奇字体更大更亮）
             nvgFontFace(vg, "sans")
-            nvgFontSize(vg, 9)
-            nvgTextAlign(vg, NVG_ALIGN_CENTER + NVG_ALIGN_BOTTOM)
-            nvgFillColor(vg, nvgRGBA(col[1], col[2], col[3], 200))
-            nvgText(vg, item.x, item.y + bounce - 12, item.itemData.name, nil)
+            if rarity >= 5 then
+                nvgFontSize(vg, 10)
+                nvgTextAlign(vg, NVG_ALIGN_CENTER + NVG_ALIGN_BOTTOM)
+                nvgFillColor(vg, nvgRGBA(255, 240, 80, 230))
+                nvgText(vg, item.x, item.y + bounce - 23, item.itemData.name, nil)
+            elseif rarity >= 4 then
+                nvgFontSize(vg, 9)
+                nvgTextAlign(vg, NVG_ALIGN_CENTER + NVG_ALIGN_BOTTOM)
+                nvgFillColor(vg, nvgRGBA(col[1], col[2], col[3], 220))
+                nvgText(vg, item.x, item.y + bounce - 16, item.itemData.name, nil)
+            else
+                nvgFontSize(vg, 9)
+                nvgTextAlign(vg, NVG_ALIGN_CENTER + NVG_ALIGN_BOTTOM)
+                nvgFillColor(vg, nvgRGBA(col[1], col[2], col[3], 200))
+                nvgText(vg, item.x, item.y + bounce - 12, item.itemData.name, nil)
+            end
 
             -- 靠近弹窗
             local dx = player.x - item.x

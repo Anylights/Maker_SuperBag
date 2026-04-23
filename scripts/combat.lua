@@ -14,6 +14,12 @@ local function getFx()
     return Fx
 end
 
+local MI = nil  -- 延迟加载移动端输入模块
+local function getMI()
+    if not MI then MI = require("mobile_input") end
+    return MI
+end
+
 local Combat = {}
 
 function Combat.TryMelee()
@@ -83,7 +89,8 @@ function Combat.TryShoot()
     burnDmg = math.floor(burnDmg * burnComboMult)
     local burnDur = 2.0 + Inv.GetStat("combo_burnDurationBonus", 0)
 
-    local slowAmt = Inv.GetStat("slowAmount", 0) + Inv.GetStat("combo_slowAmountBonus", 0)
+    local slowAmt = Inv.GetStat("slowAmount", 0) + Inv.GetStat("combo_slowPercent", 0)
+    local freezeChance = Inv.GetStat("combo_freezeChance", 0)  -- 来自combo_polar Lv2/Lv3
 
     local explRadius = Inv.GetStat("explosionRadius", 0)
     local explDamage = Inv.GetStat("explosionDamage", 0)
@@ -153,6 +160,7 @@ function Combat.TryShoot()
             burnDuration = burnDmg > 0 and burnDur or nil,
             slowAmount = slowAmt > 0 and slowAmt or nil,
             slowDuration = slowAmt > 0 and 2.0 or nil,
+            freezeChance = freezeChance > 0 and freezeChance or nil,
             explosionRadius = explRadius > 0 and explRadius or nil,
             explosionDamage = explDamage > 0 and explDamage or nil,
         })
@@ -255,70 +263,88 @@ end
 function Combat.UpdatePlayer(dt)
     if not G.player.alive then return end
 
-    -- WASD 移动
-    local dx, dy = 0, 0
-    if input:GetKeyDown(KEY_W) then dy = dy - 1 end
-    if input:GetKeyDown(KEY_S) then dy = dy + 1 end
-    if input:GetKeyDown(KEY_A) then dx = dx - 1 end
-    if input:GetKeyDown(KEY_D) then dx = dx + 1 end
+    -- 冲刺中跳过普通移动（位置已由 HandleUpdate 更新）
+    if not (G.player.dashTimer > 0) then
+        -- 移动输入
+        local dx, dy = 0, 0
+        if G.isMobile then
+            local mi = getMI()
+            dx, dy = mi.moveDX, mi.moveDY
+        else
+            -- WASD 移动
+            if input:GetKeyDown(KEY_W) then dy = dy - 1 end
+            if input:GetKeyDown(KEY_S) then dy = dy + 1 end
+            if input:GetKeyDown(KEY_A) then dx = dx - 1 end
+            if input:GetKeyDown(KEY_D) then dx = dx + 1 end
 
-    -- 归一化
-    if dx ~= 0 or dy ~= 0 then
-        local len = math.sqrt(dx * dx + dy * dy)
-        dx = dx / len
-        dy = dy / len
+            -- 归一化
+            if dx ~= 0 or dy ~= 0 then
+                local len = math.sqrt(dx * dx + dy * dy)
+                dx = dx / len
+                dy = dy / len
+            end
+        end
+
+        local effectiveSpeed = G.player.speed + Inv.GetStat("moveSpeed", 0)
+        local newX = G.player.x + dx * effectiveSpeed * dt
+        local newY = G.player.y + dy * effectiveSpeed * dt
+
+        -- 墙碰撞修正
+        newX, newY = getMap().ResolveWallCollision(newX, newY, G.player.radius)
+
+        -- 边界限制
+        newX = math.max(G.player.radius, math.min(G.MAP_W - G.player.radius, newX))
+        newY = math.max(G.player.radius, math.min(G.MAP_H - G.player.radius, newY))
+
+        -- 移动脚步声
+        if dx ~= 0 or dy ~= 0 then
+            G.footstepTimer = G.footstepTimer - dt
+            if G.footstepTimer <= 0 then
+                G.PlaySfx(G.sndFootstep, 0.25)
+                G.footstepTimer = 0.3
+            end
+        else
+            G.footstepTimer = 0
+        end
+
+        -- 移动脚步尘土
+        if dx ~= 0 or dy ~= 0 then
+            if math.random() < 0.3 then
+                local dustAngle = math.random() * math.pi * 2
+                table.insert(G.particles, {
+                    x = G.player.x + (math.random() - 0.5) * 8,
+                    y = G.player.y + (math.random() - 0.5) * 8,
+                    vx = -dx * 15 + math.cos(dustAngle) * 8,
+                    vy = -dy * 15 + math.sin(dustAngle) * 8,
+                    life = 0.3 + math.random() * 0.2,
+                    maxLife = 0.5,
+                    r = 140, g = 135, b = 120,
+                    size = 2 + math.random() * 2,
+                    drag = 0.92,
+                })
+            end
+        end
+
+        G.player.x = newX
+        G.player.y = newY
     end
 
-    local effectiveSpeed = G.player.speed + Inv.GetStat("moveSpeed", 0)
-    local newX = G.player.x + dx * effectiveSpeed * dt
-    local newY = G.player.y + dy * effectiveSpeed * dt
-
-    -- 墙碰撞修正
-    newX, newY = getMap().ResolveWallCollision(newX, newY, G.player.radius)
-
-    -- 边界限制
-    newX = math.max(G.player.radius, math.min(G.MAP_W - G.player.radius, newX))
-    newY = math.max(G.player.radius, math.min(G.MAP_H - G.player.radius, newY))
-
-    -- 移动脚步声
-    if dx ~= 0 or dy ~= 0 then
-        G.footstepTimer = G.footstepTimer - dt
-        if G.footstepTimer <= 0 then
-            G.PlaySfx(G.sndFootstep, 0.25)
-            G.footstepTimer = 0.3  -- 每0.3秒一步
+    -- 玩家朝向
+    if G.isMobile then
+        -- 移动端: 右摇杆激活时使用摇杆角度，否则保持上次角度
+        local mi = getMI()
+        if mi.isShooting then
+            G.player.angle = mi.aimAngle
         end
     else
-        G.footstepTimer = 0  -- 停下时重置，起步立刻有声
+        -- 桌面端: 鼠标方向 → 玩家朝向 (物理屏幕坐标 → 设计坐标 → 世界坐标)
+        local mx = input:GetMousePosition().x
+        local my = input:GetMousePosition().y
+        local designMX, designMY = G.ScreenToDesign(mx, my)
+        local worldMX = designMX / G.camZoom + G.camX
+        local worldMY = designMY / G.camZoom + G.camY
+        G.player.angle = math.atan(worldMY - G.player.y, worldMX - G.player.x)
     end
-
-    -- 移动脚步尘土
-    if dx ~= 0 or dy ~= 0 then
-        if math.random() < 0.3 then  -- 30%概率每帧产生
-            local dustAngle = math.random() * math.pi * 2
-            table.insert(G.particles, {
-                x = G.player.x + (math.random() - 0.5) * 8,
-                y = G.player.y + (math.random() - 0.5) * 8,
-                vx = -dx * 15 + math.cos(dustAngle) * 8,
-                vy = -dy * 15 + math.sin(dustAngle) * 8,
-                life = 0.3 + math.random() * 0.2,
-                maxLife = 0.5,
-                r = 140, g = 135, b = 120,
-                size = 2 + math.random() * 2,
-                drag = 0.92,
-            })
-        end
-    end
-
-    G.player.x = newX
-    G.player.y = newY
-
-    -- 鼠标方向 → 玩家朝向 (物理屏幕坐标 → 设计坐标 → 世界坐标)
-    local mx = input:GetMousePosition().x
-    local my = input:GetMousePosition().y
-    local designMX, designMY = G.ScreenToDesign(mx, my)
-    local worldMX = designMX / G.camZoom + G.camX
-    local worldMY = designMY / G.camZoom + G.camY
-    G.player.angle = math.atan(worldMY - G.player.y, worldMX - G.player.x)
 
     -- 射击冷却
     if G.player.fireTimer > 0 then

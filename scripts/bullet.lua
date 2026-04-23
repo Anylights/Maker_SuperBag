@@ -155,11 +155,33 @@ function Bullet.UpdateBullets(dt)
                         e.burnTickTimer = e.burnTickTimer or 0
                         G.PlaySfx(G.sndBurnHit, 0.25)
                     end
-                    -- 减速: 降低移动速度
+                    -- 减速/冰冻: 降低或完全停止移动+攻击
                     if b.slowAmount and b.slowAmount > 0 then
-                        e.slowTimer = b.slowDuration or 2.0
-                        e.slowPercent = math.min(0.8, (b.slowAmount / 100))  -- 最多减速80%
-                        G.PlaySfx(G.sndFrostHit, 0.25)
+                        local doFreeze = b.freezeChance and (math.random() * 100 < b.freezeChance)
+                        if doFreeze then
+                            -- 完全冰冻: 无法移动 + 无法攻击
+                            e.frozenTimer = 2.5
+                            e.slowTimer = nil
+                            e.slowPercent = nil
+                            G.PlaySfx(G.sndFrostHit, 0.4)
+                            -- 冰冻爆发粒子效果
+                            for kp = 1, 12 do
+                                local pa = (kp / 12) * math.pi * 2
+                                table.insert(G.particles, {
+                                    x = e.x + math.cos(pa) * e.radius,
+                                    y = e.y + math.sin(pa) * e.radius,
+                                    vx = math.cos(pa) * (30 + math.random() * 20),
+                                    vy = math.sin(pa) * (30 + math.random() * 20),
+                                    life = 0.6, maxLife = 0.6,
+                                    r = 160, g = 220, b = 255,
+                                    size = 3 + math.random() * 2, glow = true,
+                                })
+                            end
+                        else
+                            e.slowTimer = b.slowDuration or 2.0
+                            e.slowPercent = math.min(0.9, (b.slowAmount / 100))
+                            G.PlaySfx(G.sndFrostHit, 0.25)
+                        end
                     end
                     -- 爆炸: 对周围敌人造成AOE伤害
                     if b.explosionRadius and b.explosionRadius > 0 and b.explosionDamage and b.explosionDamage > 0 then
@@ -212,47 +234,94 @@ function Bullet.UpdateBullets(dt)
                                 end
                             end
                         end
-                        -- 爆炸冲击波视觉: 外圈快速扩散环
-                        for kp = 1, 20 do
-                            local pa = (kp / 20) * math.pi * 2 + (math.random() - 0.5) * 0.15
-                            local spd = b.explosionRadius * 2.5
+                        local R = b.explosionRadius
+                        -- 层1: 核心白热闪光 (极亮极短)
+                        table.insert(G.particles, {
+                            x = e.x, y = e.y, vx = 0, vy = 0,
+                            life = 0.07, maxLife = 0.07,
+                            r = 255, g = 255, b = 255,
+                            size = R * 1.1, glow = true, drag = 1.0,
+                        })
+                        -- 层2: 橙黄核心光晕
+                        table.insert(G.particles, {
+                            x = e.x, y = e.y, vx = 0, vy = 0,
+                            life = 0.18, maxLife = 0.18,
+                            r = 255, g = 180, b = 40,
+                            size = R * 0.85, glow = true, drag = 1.0,
+                        })
+                        -- 层3: 红色余热光晕 (稍慢消散)
+                        table.insert(G.particles, {
+                            x = e.x, y = e.y, vx = 0, vy = 0,
+                            life = 0.35, maxLife = 0.35,
+                            r = 220, g = 60, b = 10,
+                            size = R * 0.55, glow = true, drag = 1.0,
+                        })
+                        -- 层4: 冲击波环 (32个粒子, 均匀分布, 高速扩散)
+                        for kp = 1, 32 do
+                            local pa = (kp / 32) * math.pi * 2
+                            local spd = R * 3.2 + math.random() * R * 0.5
                             table.insert(G.particles, {
                                 x = e.x, y = e.y,
                                 vx = math.cos(pa) * spd, vy = math.sin(pa) * spd,
-                                life = 0.3, maxLife = 0.3,
-                                r = 255, g = 180, b = 60,
-                                size = 3 + math.random() * 2.5, glow = true, drag = 0.95,
+                                life = 0.22, maxLife = 0.22,
+                                r = 255, g = 220 - math.random(60), b = 80,
+                                size = 4 + math.random() * 3, glow = true, drag = 0.88,
                             })
                         end
-                        -- 内圈慢速烈焰碎片(向上飘)
-                        for kp = 1, 10 do
+                        -- 层5: 外扩碎片 (16个, 中速, 橙红)
+                        for kp = 1, 16 do
                             local pa = math.random() * math.pi * 2
-                            local spd = 30 + math.random() * 60
+                            local spd = R * 1.2 + math.random() * R
                             table.insert(G.particles, {
-                                x = e.x + (math.random() - 0.5) * 8,
-                                y = e.y + (math.random() - 0.5) * 8,
-                                vx = math.cos(pa) * spd,
-                                vy = math.sin(pa) * spd - 30,
-                                life = 0.35 + math.random() * 0.25,
-                                maxLife = 0.6,
-                                r = 255, g = 100 + math.random(80), b = 20 + math.random(30),
-                                size = 2 + math.random() * 3, glow = true, drag = 0.94,
+                                x = e.x + math.cos(pa) * R * 0.15,
+                                y = e.y + math.sin(pa) * R * 0.15,
+                                vx = math.cos(pa) * spd, vy = math.sin(pa) * spd,
+                                life = 0.35 + math.random() * 0.2, maxLife = 0.55,
+                                r = 255, g = 120 + math.random(80), b = 20,
+                                size = 3 + math.random() * 4, glow = true, drag = 0.92,
                             })
                         end
-                        -- 爆炸中心白色闪光(更大更亮)
-                        table.insert(G.particles, {
-                            x = e.x, y = e.y, vx = 0, vy = 0,
-                            life = 0.1, maxLife = 0.1,
-                            r = 255, g = 255, b = 220,
-                            size = b.explosionRadius * 0.8, glow = true, drag = 1.0,
-                        })
-                        -- 橙色次级光晕
-                        table.insert(G.particles, {
-                            x = e.x, y = e.y, vx = 0, vy = 0,
-                            life = 0.15, maxLife = 0.15,
-                            r = 255, g = 160, b = 40,
-                            size = b.explosionRadius * 0.5, glow = true, drag = 1.0,
-                        })
+                        -- 层6: 烟尘/碎屑 (20个, 慢速随机, 深色)
+                        for kp = 1, 20 do
+                            local pa = math.random() * math.pi * 2
+                            local spd = 20 + math.random() * R * 0.8
+                            table.insert(G.particles, {
+                                x = e.x + (math.random() - 0.5) * R * 0.4,
+                                y = e.y + (math.random() - 0.5) * R * 0.4,
+                                vx = math.cos(pa) * spd, vy = math.sin(pa) * spd - 15,
+                                life = 0.5 + math.random() * 0.4, maxLife = 0.9,
+                                r = 180 + math.random(60), g = 80 + math.random(60), b = 20,
+                                size = 2 + math.random() * 3, glow = false, drag = 0.96,
+                            })
+                        end
+                        -- 层7: 上升余烬 (12个, 向上漂浮, 持续较长)
+                        for kp = 1, 12 do
+                            local pa = (math.random() - 0.5) * math.pi * 2
+                            local spd = 15 + math.random() * 30
+                            table.insert(G.particles, {
+                                x = e.x + (math.random() - 0.5) * R * 0.6,
+                                y = e.y + (math.random() - 0.5) * R * 0.3,
+                                vx = math.cos(pa) * spd * 0.3,
+                                vy = -(40 + math.random() * 60),
+                                life = 0.6 + math.random() * 0.5, maxLife = 1.1,
+                                r = 255, g = 140 + math.random(60), b = 20,
+                                size = 1.5 + math.random() * 2, glow = true, drag = 0.98,
+                            })
+                        end
+                        -- 层8: 地面焦痕光环 (8个, 贴地扩散极慢)
+                        for kp = 1, 8 do
+                            local pa = (kp / 8) * math.pi * 2
+                            table.insert(G.particles, {
+                                x = e.x + math.cos(pa) * R * 0.3,
+                                y = e.y + math.sin(pa) * R * 0.3,
+                                vx = math.cos(pa) * 8, vy = math.sin(pa) * 8,
+                                life = 0.8, maxLife = 0.8,
+                                r = 80, g = 40, b = 10,
+                                size = 5 + math.random() * 4, glow = false, drag = 0.99,
+                            })
+                        end
+                        -- 屏幕震动 (爆炸越大震动越强)
+                        getFx().TriggerShake(math.min(8.0, R * 0.12), 0.25)
                     end
 
                     -- === 感电链式闪电(延迟队列，逐跳传递) ===
@@ -418,12 +487,12 @@ function Bullet.UpdateBullets(dt)
                         G.score = G.score + 50
                         -- 掉落物(弹药/血包)
                         local lootRoll = math.random(1, 100)
-                        if lootRoll <= 40 then
+                        if lootRoll <= 70 then
                             table.insert(G.lootItems, {
                                 x = e.x, y = e.y,
-                                type = "ammo", amount = math.random(3, 8),
+                                type = "ammo", amount = math.random(8, 18),
                             })
-                        elseif lootRoll <= 60 then
+                        elseif lootRoll <= 85 then
                             table.insert(G.lootItems, {
                                 x = e.x, y = e.y,
                                 type = "health", amount = math.random(15, 30),
@@ -499,7 +568,7 @@ function Bullet.UpdateBullets(dt)
         -- 敌人子弹 → 玩家
         if not remove and not b.fromPlayer and G.player.alive then
             if getMap().CircleCollision(b.x, b.y, b.radius, G.player.x, G.player.y, G.player.radius) then
-                if G.player.invincibleTimer <= 0 then
+                if G.player.invincibleTimer <= 0 and not (G.player.dashTimer > 0) then
                     local incomingDmg = b.damage
                     -- 护盾吸收
                     if G.player.shield > 0 then

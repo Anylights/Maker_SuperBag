@@ -102,8 +102,25 @@ end
 -- 输入处理
 -- ============================================================================
 
+-- 移动端点选模式状态
+UI.selectedItem = nil        -- 移动端已选中的物品
+UI.selectedSource = nil      -- "grid" | "pickup"
+UI.selectedLootRef = nil     -- 拾取来源引用
+UI.touchMX = 0               -- 最后触控设计坐标
+UI.touchMY = 0
+
+--- 移动端: 旋转/丢弃按钮位置(在Draw中动态计算)
+local rotateBtnX_, rotateBtnY_ = 0, 0
+local discardBtnX_, discardBtnY_ = 0, 0
+local mobileBtnSize_ = 40
+
 function UI.HandleMouseDown(mx, my, button)
     if not UI.isOpen then return false end
+
+    -- 移动端: 点选模式
+    if G.isMobile then
+        return UI.HandleTouchSelect(mx, my)
+    end
 
     if button == MOUSEB_LEFT then
         -- 检查是否点击了格子中的物品
@@ -155,8 +172,114 @@ function UI.HandleMouseDown(mx, my, button)
     return true
 end
 
+--- 移动端点选处理: 第一次点击选中, 第二次点击放置
+function UI.HandleTouchSelect(mx, my)
+    UI.touchMX = mx
+    UI.touchMY = my
+
+    -- 如果有选中物品: 检查操作按钮
+    if UI.selectedItem then
+        -- 旋转按钮
+        if mx >= rotateBtnX_ and mx <= rotateBtnX_ + mobileBtnSize_
+           and my >= rotateBtnY_ and my <= rotateBtnY_ + mobileBtnSize_ then
+            Inv.RotateItem(UI.selectedItem)
+            G.PlaySfx(G.sndItemRotate, 0.3)
+            return true
+        end
+
+        -- 丢弃按钮
+        if mx >= discardBtnX_ and mx <= discardBtnX_ + mobileBtnSize_
+           and my >= discardBtnY_ and my <= discardBtnY_ + mobileBtnSize_ then
+            local item = UI.selectedItem
+            local source = UI.selectedSource
+            local lootRef = UI.selectedLootRef
+            UI.selectedItem = nil
+            UI.selectedSource = nil
+            UI.selectedLootRef = nil
+            if source == "pickup" then
+                UI.AddToPickup(item, lootRef)
+            else
+                UI.AddToPickup(item, nil)
+            end
+            G.PlaySfx(G.sndItemDiscard, 0.3)
+            return true
+        end
+
+        -- 点击格子: 尝试放置
+        local col, row = UI.ScreenToGrid(mx, my)
+        if col >= 1 and col <= Inv.cols and row >= 1 and row <= Inv.rows then
+            local item = UI.selectedItem
+            local source = UI.selectedSource
+            local lootRef = UI.selectedLootRef
+            local w, h = Inv.GetItemBounds(item)
+            local placeCol = col - math.floor(w / 2)
+            local placeRow = row - math.floor(h / 2)
+
+            if Inv.CanPlace(item, placeCol, placeRow) then
+                Inv.PlaceItem(item, placeCol, placeRow)
+                G.PlaySfx(G.sndItemPlace, 0.4)
+                if source == "pickup" and lootRef and UI.onPickupPlaced then
+                    UI.onPickupPlaced(lootRef)
+                end
+                UI.selectedItem = nil
+                UI.selectedSource = nil
+                UI.selectedLootRef = nil
+                return true
+            end
+            -- 放置失败: 保持选中状态
+            return true
+        end
+
+        -- 点击面板外: 取消选中(放回原处)
+        local outsidePanel = mx < panelX_ or mx > panelX_ + panelW_
+                          or my < panelY_ or my > panelY_ + panelH_
+        if outsidePanel then
+            local item = UI.selectedItem
+            local lootRef = UI.selectedLootRef
+            UI.selectedItem = nil
+            UI.selectedSource = nil
+            UI.selectedLootRef = nil
+            UI.AddToPickup(item, lootRef)
+            return true
+        end
+
+        return true
+    end
+
+    -- 没有选中物品: 检查是否点击了格子中的物品
+    local col, row = UI.ScreenToGrid(mx, my)
+    if col >= 1 and col <= Inv.cols and row >= 1 and row <= Inv.rows then
+        local item = Inv.GetItemAt(col, row)
+        if item then
+            UI.selectedItem = item
+            UI.selectedSource = "grid"
+            UI.selectedLootRef = nil
+            Inv.RemoveItem(item)
+            G.PlaySfx(G.sndItemPickup, 0.3)
+            return true
+        end
+    end
+
+    -- 检查是否点击了拾取区的物品
+    local pickupIdx = UI.GetPickupItemAt(mx, my)
+    if pickupIdx > 0 then
+        local entry = UI.pickupItems[pickupIdx]
+        UI.selectedItem = entry.item
+        UI.selectedSource = "pickup"
+        UI.selectedLootRef = entry.lootRef
+        table.remove(UI.pickupItems, pickupIdx)
+        G.PlaySfx(G.sndItemPickup, 0.3)
+        return true
+    end
+
+    return true
+end
+
 function UI.HandleMouseUp(mx, my, button)
     if not UI.isOpen then return false end
+
+    -- 移动端不需要MouseUp处理(点选模式)
+    if G.isMobile then return true end
 
     if button == MOUSEB_LEFT and UI.dragItem then
         local item = UI.dragItem
@@ -370,12 +493,22 @@ function UI.Draw(nvg, logicalW, logicalH, mouseX, mouseY)
     -- === 11. 拾取区物品(面板左侧) ===
     UI.DrawPickupItems(nvg, alpha)
 
-    -- === 12. 操作提示 ===
+    -- === 12. 移动端选中物品预览 + 操作按钮 ===
+    if G.isMobile and UI.selectedItem then
+        UI.DrawMobileSelection(nvg, logicalW, logicalH, alpha)
+    end
+
+    -- === 13. 操作提示 ===
     nvgFontSize(nvg, 10)
     nvgTextAlign(nvg, NVG_ALIGN_CENTER + NVG_ALIGN_BOTTOM)
     nvgFillColor(nvg, nvgRGBA(140, 140, 160, math.floor(160 * alpha)))
-    nvgText(nvg, logicalW / 2, logicalH - 10,
-        "拖拽放置 | 右键/R旋转 | 拖出面板丢弃 | 填满整行/列升级 | Tab关闭背包", nil)
+    if G.isMobile then
+        nvgText(nvg, logicalW / 2, logicalH - 10,
+            "点击物品选中 → 点击格子放置 | 旋转/丢弃按钮在右侧", nil)
+    else
+        nvgText(nvg, logicalW / 2, logicalH - 10,
+            "拖拽放置 | 右键/R旋转 | 拖出面板丢弃 | 填满整行/列升级 | Tab关闭背包", nil)
+    end
 end
 
 -- ============================================================================
@@ -1126,6 +1259,85 @@ function UI.DrawPickupItems(nvg, alpha)
 
         y = y + ph + 10
         if i >= 8 then break end
+    end
+end
+
+-- ============================================================================
+-- 移动端选中物品预览 + 操作按钮
+-- ============================================================================
+function UI.DrawMobileSelection(nvg, logicalW, logicalH, alpha)
+    local item = UI.selectedItem
+    if not item then return end
+
+    local cells = Inv.GetItemCells(item)
+    local w, h = Inv.GetItemBounds(item)
+    local rarityCol = Data.RARITY_COLORS[item.rarity] or {200, 200, 200}
+
+    -- 操作按钮位置: 面板右侧
+    rotateBtnX_ = panelX_ + panelW_ + 10
+    rotateBtnY_ = panelY_ + 60
+    discardBtnX_ = rotateBtnX_
+    discardBtnY_ = rotateBtnY_ + mobileBtnSize_ + 10
+
+    -- 旋转按钮
+    nvgBeginPath(nvg)
+    nvgRoundedRect(nvg, rotateBtnX_, rotateBtnY_, mobileBtnSize_, mobileBtnSize_, 8)
+    nvgFillColor(nvg, nvgRGBA(40, 80, 160, math.floor(200 * alpha)))
+    nvgFill(nvg)
+    nvgStrokeColor(nvg, nvgRGBA(100, 160, 255, math.floor(200 * alpha)))
+    nvgStrokeWidth(nvg, 1.5)
+    nvgStroke(nvg)
+    nvgFontFace(nvg, "sans")
+    nvgFontSize(nvg, 14)
+    nvgTextAlign(nvg, NVG_ALIGN_CENTER + NVG_ALIGN_MIDDLE)
+    nvgFillColor(nvg, nvgRGBA(255, 255, 255, math.floor(240 * alpha)))
+    nvgText(nvg, rotateBtnX_ + mobileBtnSize_ / 2, rotateBtnY_ + mobileBtnSize_ / 2, "旋转", nil)
+
+    -- 丢弃按钮
+    nvgBeginPath(nvg)
+    nvgRoundedRect(nvg, discardBtnX_, discardBtnY_, mobileBtnSize_, mobileBtnSize_, 8)
+    nvgFillColor(nvg, nvgRGBA(160, 40, 40, math.floor(200 * alpha)))
+    nvgFill(nvg)
+    nvgStrokeColor(nvg, nvgRGBA(255, 100, 100, math.floor(200 * alpha)))
+    nvgStrokeWidth(nvg, 1.5)
+    nvgStroke(nvg)
+    nvgFontSize(nvg, 14)
+    nvgFillColor(nvg, nvgRGBA(255, 255, 255, math.floor(240 * alpha)))
+    nvgText(nvg, discardBtnX_ + mobileBtnSize_ / 2, discardBtnY_ + mobileBtnSize_ / 2, "丢弃", nil)
+
+    -- 选中物品信息提示
+    nvgFontSize(nvg, 11)
+    nvgTextAlign(nvg, NVG_ALIGN_CENTER + NVG_ALIGN_TOP)
+    nvgFillColor(nvg, nvgRGBA(rarityCol[1], rarityCol[2], rarityCol[3], math.floor(240 * alpha)))
+    nvgText(nvg, rotateBtnX_ + mobileBtnSize_ / 2, rotateBtnY_ - 18, item.name, nil)
+
+    -- 放置预览高亮(跟随最后触控位置)
+    local col, row = UI.ScreenToGrid(UI.touchMX, UI.touchMY)
+    if col >= 1 and col <= Inv.cols and row >= 1 and row <= Inv.rows then
+        local placeCol = col - math.floor(w / 2)
+        local placeRow = row - math.floor(h / 2)
+        local canPlace = Inv.CanPlace(item, placeCol, placeRow)
+
+        for _, cell in ipairs(cells) do
+            local c = placeCol + cell[1]
+            local r = placeRow + cell[2]
+            if c >= 1 and c <= Inv.cols and r >= 1 and r <= Inv.rows then
+                local x = gridOriginX + (c - 1) * cellSize
+                local y = gridOriginY + (r - 1) * cellSize
+                nvgBeginPath(nvg)
+                nvgRoundedRect(nvg, x + 1, y + 1, cellSize - 2, cellSize - 2, 2)
+                if canPlace then
+                    nvgFillColor(nvg, nvgRGBA(60, 200, 80, math.floor(80 * alpha)))
+                    nvgStrokeColor(nvg, nvgRGBA(60, 200, 80, math.floor(180 * alpha)))
+                else
+                    nvgFillColor(nvg, nvgRGBA(220, 60, 60, math.floor(80 * alpha)))
+                    nvgStrokeColor(nvg, nvgRGBA(220, 60, 60, math.floor(180 * alpha)))
+                end
+                nvgFill(nvg)
+                nvgStrokeWidth(nvg, 1.5)
+                nvgStroke(nvg)
+            end
+        end
     end
 end
 

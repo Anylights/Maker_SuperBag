@@ -31,28 +31,28 @@ G.CRATE_CONFIG = {
     [G.TILE_CRATE_WOOD] = {
         name = "木箱",
         searchTime = 1.0,
-        ammoChance   = 50,
+        ammoChance   = 90,
         healthChance = 85,
         maxRarity = 2,
-        ammoRange = {5, 12},
+        ammoRange = {15, 25},
         healthRange = {15, 30},
     },
     [G.TILE_CRATE_IRON] = {
         name = "铁箱",
         searchTime = 2.0,
-        ammoChance   = 30,
+        ammoChance   = 80,
         healthChance = 55,
         maxRarity = 3,
-        ammoRange = {8, 18},
+        ammoRange = {25, 40},
         healthRange = {25, 45},
     },
     [G.TILE_CRATE_GOLD] = {
         name = "金箱",
         searchTime = 3.5,
-        ammoChance   = 15,
+        ammoChance   = 70,
         healthChance = 30,
         maxRarity = 5,
-        ammoRange = {12, 25},
+        ammoRange = {35, 60},
         healthRange = {35, 60},
     },
 }
@@ -83,6 +83,8 @@ function G.PickWeightedCrate(wave)
 end
 
 -- 游戏状态枚举
+G.STATE_COMIC     = "comic"
+G.STATE_TITLE     = "title"
 G.STATE_PLAYING   = "playing"
 G.STATE_PAUSED    = "paused"
 G.STATE_DYING     = "dying"
@@ -97,7 +99,7 @@ G.WEAPON = {
     fireRate = 0.2,
     bulletSpeed = 1000,
     magSize = 12,
-    totalAmmo = 60,
+    totalAmmo = 150,
     reloadTime = 1.5,
     spread = 3,
     bulletRadius = 3,
@@ -220,6 +222,9 @@ G.sndLevelClear = nil
 G.footstepTimer = 0
 G.audioScene    = nil
 
+-- 平台检测（默认PC；第一个TouchBegin事件触发时自动切换为true）
+G.isMobile = false
+
 -- 游戏运行时
 G.gameState    = G.STATE_PLAYING
 G.gameTime     = 0
@@ -252,7 +257,7 @@ G.player = {
     hp = 100, maxHp = 100,
     angle = 0,
     ammo = 12,
-    totalAmmo = 60,
+    totalAmmo = 150,
     reloading = false,
     reloadTimer = 0,
     fireTimer = 0,
@@ -273,6 +278,11 @@ G.player = {
     -- 视觉后坐力
     recoilX = 0,
     recoilY = 0,
+    -- 冲刺系统
+    dashTimer = 0,      -- 冲刺剩余时间 (>0 = 正在冲刺)
+    dashCooldown = 0,   -- 冷却倒计时
+    dashDirX = 0,       -- 冲刺方向
+    dashDirY = 0,
 }
 
 -- 实体列表

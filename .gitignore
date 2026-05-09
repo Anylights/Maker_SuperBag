@@ -1,7 +1,2 @@
 .build/
 dist/
-.agent/
-.claude/
-.cli/
-.tmp/
-logs/

@@ -538,16 +538,39 @@ function RW.DrawEnemies()
         -- === 状态效果视觉（增强版） ===
         if e.burnTimer and e.burnTimer > 0 then
             local flicker = math.sin(gameTimeAcc * 12 + i * 2.3) * 0.3 + 0.7
-            -- 外圈火焰环
+            local flicker2 = math.sin(gameTimeAcc * 18 + i * 1.7) * 0.25 + 0.75
+            -- 外层热浪光晕（径向渐变）
+            local glowR = e.radius + 18 + 4 * flicker
+            local glowPaint = nvgRadialGradient(vg, e.x, e.y, e.radius * 0.8, glowR,
+                nvgRGBA(255, 140, 30, math.floor(110 * flicker)),
+                nvgRGBA(255, 60, 0, 0))
+            nvgBeginPath(vg)
+            nvgCircle(vg, e.x, e.y, glowR)
+            nvgFillPaint(vg, glowPaint)
+            nvgFill(vg)
+            -- 中层烈焰渐变
+            local flamePaint = nvgRadialGradient(vg, e.x, e.y, 0, e.radius + 6,
+                nvgRGBA(255, 220, 80, math.floor(180 * flicker2)),
+                nvgRGBA(255, 50, 0, math.floor(60 * flicker)))
+            nvgBeginPath(vg)
+            nvgCircle(vg, e.x, e.y, e.radius + 6)
+            nvgFillPaint(vg, flamePaint)
+            nvgFill(vg)
+            -- 外圈火焰环（双层）
             nvgBeginPath(vg)
             nvgCircle(vg, e.x, e.y, e.radius + 5)
-            nvgStrokeColor(vg, nvgRGBA(255, 120, 30, math.floor(140 * flicker)))
+            nvgStrokeColor(vg, nvgRGBA(255, 120, 30, math.floor(180 * flicker)))
             nvgStrokeWidth(vg, 2.5)
             nvgStroke(vg)
-            -- 内部橙色覆盖
             nvgBeginPath(vg)
-            nvgCircle(vg, e.x, e.y, e.radius)
-            nvgFillColor(vg, nvgRGBA(255, 80, 20, math.floor(50 * flicker)))
+            nvgCircle(vg, e.x, e.y, e.radius + 9)
+            nvgStrokeColor(vg, nvgRGBA(255, 200, 60, math.floor(120 * flicker2)))
+            nvgStrokeWidth(vg, 1.5)
+            nvgStroke(vg)
+            -- 内部白热核心
+            nvgBeginPath(vg)
+            nvgCircle(vg, e.x, e.y, e.radius * 0.5)
+            nvgFillColor(vg, nvgRGBA(255, 240, 180, math.floor(80 * flicker)))
             nvgFill(vg)
             -- 上升火焰小三角（3个）
             for fi = 0, 2 do
@@ -657,8 +680,12 @@ function RW.DrawBullets()
     for _, b in ipairs(G.bullets) do
         local fx = b.bulletFx or "normal"
         local fxc = BULLET_FX_COLORS[fx] or BULLET_FX_COLORS.normal
+        local layers = b.fxLayers or { fx }
+        -- 快速查询某层是否激活
+        local hasLayer = {}
+        for _, ln in ipairs(layers) do hasLayer[ln] = true end
 
-        -- === 拖尾轨迹 ===
+        -- === 拖尾轨迹（多层叠加：每个特效追加一层不同色彩拖尾，使用渐变实现混色）===
         if b.trail and #b.trail > 0 then
             local cr, cg, cb
             if b.fromPlayer then
@@ -674,6 +701,7 @@ function RW.DrawBullets()
                 local trailAlpha = math.floor(200 * frac)
                 local width = b.radius * 2.2 * frac + 0.5
 
+                -- 主体拖尾（按主特效色）
                 nvgBeginPath(vg)
                 nvgMoveTo(vg, prevX, prevY)
                 nvgLineTo(vg, t.x, t.y)
@@ -682,18 +710,111 @@ function RW.DrawBullets()
                 nvgLineCap(vg, NVG_ROUND)
                 nvgStroke(vg)
 
-                if b.fromPlayer and (fx == "burn" or fx == "frost" or fx == "shock" or fx == "explosive") then
-                    nvgBeginPath(vg)
-                    nvgMoveTo(vg, prevX, prevY)
-                    nvgLineTo(vg, t.x, t.y)
-                    local gc = fxc.glow
-                    nvgStrokeColor(vg, nvgRGBA(gc[1], gc[2], gc[3], math.floor(trailAlpha * 0.3)))
-                    nvgStrokeWidth(vg, width + 4)
-                    nvgLineCap(vg, NVG_ROUND)
-                    nvgStroke(vg)
+                if b.fromPlayer then
+                    -- 冰霜叠加层：蓝白渐变拖尾（消散感）
+                    if hasLayer["frost"] and fx ~= "frost" then
+                        local paint = nvgLinearGradient(vg, prevX, prevY, t.x, t.y,
+                            nvgRGBA(220, 240, 255, math.floor(trailAlpha * 0.55)),
+                            nvgRGBA(120, 200, 255, 0))
+                        nvgBeginPath(vg)
+                        nvgMoveTo(vg, prevX, prevY)
+                        nvgLineTo(vg, t.x, t.y)
+                        nvgStrokePaint(vg, paint)
+                        nvgStrokeWidth(vg, width + 3)
+                        nvgLineCap(vg, NVG_ROUND)
+                        nvgStroke(vg)
+                    end
+                    -- 燃烧叠加层：橙红外焰
+                    if hasLayer["burn"] and fx ~= "burn" then
+                        nvgBeginPath(vg)
+                        nvgMoveTo(vg, prevX, prevY)
+                        nvgLineTo(vg, t.x, t.y)
+                        nvgStrokeColor(vg, nvgRGBA(255, 130, 30, math.floor(trailAlpha * 0.4)))
+                        nvgStrokeWidth(vg, width + 4)
+                        nvgLineCap(vg, NVG_ROUND)
+                        nvgStroke(vg)
+                    end
+                    -- 感电叠加层：紫色辉光（高频闪烁）
+                    if hasLayer["shock"] and fx ~= "shock" then
+                        local flick = math.random() > 0.4 and 1.0 or 0.5
+                        nvgBeginPath(vg)
+                        nvgMoveTo(vg, prevX, prevY)
+                        nvgLineTo(vg, t.x, t.y)
+                        nvgStrokeColor(vg, nvgRGBA(180, 140, 255, math.floor(trailAlpha * 0.45 * flick)))
+                        nvgStrokeWidth(vg, width + 2)
+                        nvgLineCap(vg, NVG_ROUND)
+                        nvgStroke(vg)
+                    end
+                    -- 爆炸叠加层：深红→橙渐变拖尾
+                    if hasLayer["explosive"] and fx ~= "explosive" then
+                        local paint = nvgLinearGradient(vg, prevX, prevY, t.x, t.y,
+                            nvgRGBA(160, 20, 0, math.floor(trailAlpha * 0.5)),
+                            nvgRGBA(255, 120, 30, 0))
+                        nvgBeginPath(vg)
+                        nvgMoveTo(vg, prevX, prevY)
+                        nvgLineTo(vg, t.x, t.y)
+                        nvgStrokePaint(vg, paint)
+                        nvgStrokeWidth(vg, width + 4)
+                        nvgLineCap(vg, NVG_ROUND)
+                        nvgStroke(vg)
+                    end
+
+                    -- 主特效自身的发光环（保留旧逻辑）
+                    if fx == "burn" or fx == "frost" or fx == "shock" or fx == "explosive" then
+                        nvgBeginPath(vg)
+                        nvgMoveTo(vg, prevX, prevY)
+                        nvgLineTo(vg, t.x, t.y)
+                        local gc = fxc.glow
+                        nvgStrokeColor(vg, nvgRGBA(gc[1], gc[2], gc[3], math.floor(trailAlpha * 0.3)))
+                        nvgStrokeWidth(vg, width + 4)
+                        nvgLineCap(vg, NVG_ROUND)
+                        nvgStroke(vg)
+                    end
                 end
 
                 prevX, prevY = t.x, t.y
+            end
+        end
+
+        -- === 子弹本体外围光环：每个非主特效层贡献一层径向渐变光晕 ===
+        if b.fromPlayer then
+            local headR = b.radius + 6
+            -- 冰霜光晕
+            if hasLayer["frost"] and fx ~= "frost" then
+                local p = nvgRadialGradient(vg, b.x, b.y, 0, headR + 4,
+                    nvgRGBA(180, 230, 255, 110), nvgRGBA(180, 230, 255, 0))
+                nvgBeginPath(vg)
+                nvgCircle(vg, b.x, b.y, headR + 4)
+                nvgFillPaint(vg, p)
+                nvgFill(vg)
+            end
+            -- 燃烧光晕
+            if hasLayer["burn"] and fx ~= "burn" then
+                local p = nvgRadialGradient(vg, b.x, b.y, 0, headR + 5,
+                    nvgRGBA(255, 140, 30, 130), nvgRGBA(255, 60, 0, 0))
+                nvgBeginPath(vg)
+                nvgCircle(vg, b.x, b.y, headR + 5)
+                nvgFillPaint(vg, p)
+                nvgFill(vg)
+            end
+            -- 感电光晕
+            if hasLayer["shock"] and fx ~= "shock" then
+                local flick = math.random() > 0.4 and 1.0 or 0.6
+                local p = nvgRadialGradient(vg, b.x, b.y, 0, headR + 3,
+                    nvgRGBA(200, 180, 255, math.floor(120 * flick)), nvgRGBA(150, 100, 255, 0))
+                nvgBeginPath(vg)
+                nvgCircle(vg, b.x, b.y, headR + 3)
+                nvgFillPaint(vg, p)
+                nvgFill(vg)
+            end
+            -- 爆炸光晕（深红→橙径向渐变）
+            if hasLayer["explosive"] and fx ~= "explosive" then
+                local p = nvgRadialGradient(vg, b.x, b.y, 0, headR + 5,
+                    nvgRGBA(255, 100, 20, 150), nvgRGBA(120, 0, 0, 0))
+                nvgBeginPath(vg)
+                nvgCircle(vg, b.x, b.y, headR + 5)
+                nvgFillPaint(vg, p)
+                nvgFill(vg)
             end
         end
 
@@ -1480,6 +1601,285 @@ function RW.DrawShield()
         nvgStrokeColor(vg, nvgRGBA(60, 140, 255, math.floor(shieldAlpha * 0.3)))
         nvgStrokeWidth(vg, 5)
         nvgStroke(vg)
+    end
+end
+
+-- ============================================================================
+-- 圣物：自动炮台
+-- ============================================================================
+function RW.DrawTurrets()
+    if not G.turretEntities then return end
+    local vg = G.vg
+    local time = G.gameTime
+    for _, t in ipairs(G.turretEntities) do
+        -- 1. 阴影
+        nvgBeginPath(vg)
+        nvgEllipse(vg, t.x + 2, t.y + 5, 14, 5)
+        nvgFillColor(vg, nvgRGBA(0, 0, 0, 90))
+        nvgFill(vg)
+
+        -- 2. 地面能量光环（脉冲）
+        local pulseGlow = 0.5 + 0.5 * math.sin(time * 5)
+        local groundPaint = nvgRadialGradient(vg, t.x, t.y, 8, 26,
+            nvgRGBA(120, 200, 255, math.floor(80 + 60 * pulseGlow)),
+            nvgRGBA(120, 200, 255, 0))
+        nvgBeginPath(vg)
+        nvgCircle(vg, t.x, t.y, 26)
+        nvgFillPaint(vg, groundPaint)
+        nvgFill(vg)
+
+        -- 3. 旋转外部装甲齿环
+        local ringR = 14
+        nvgSave(vg)
+        nvgTranslate(vg, t.x, t.y)
+        nvgRotate(vg, time * 0.8)
+        for k = 0, 5 do
+            local a = (k / 6) * math.pi * 2
+            nvgBeginPath(vg)
+            nvgCircle(vg, math.cos(a) * ringR, math.sin(a) * ringR, 2.6)
+            nvgFillColor(vg, nvgRGBA(180, 220, 255, 255))
+            nvgFill(vg)
+        end
+        nvgRestore(vg)
+
+        -- 4. 主底座（金属外壳带高光渐变）
+        local basePaint = nvgRadialGradient(vg, t.x - 3, t.y - 3, 2, 13,
+            nvgRGBA(140, 150, 165, 255),
+            nvgRGBA(40, 45, 55, 255))
+        nvgBeginPath(vg)
+        nvgCircle(vg, t.x, t.y, 11)
+        nvgFillPaint(vg, basePaint)
+        nvgFill(vg)
+        nvgBeginPath(vg)
+        nvgCircle(vg, t.x, t.y, 11)
+        nvgStrokeColor(vg, nvgRGBA(200, 230, 255, 255))
+        nvgStrokeWidth(vg, 1.5)
+        nvgStroke(vg)
+
+        -- 5. 炮管（双管 + 渐变 + 能量带）
+        nvgSave(vg)
+        nvgTranslate(vg, t.x, t.y)
+        nvgRotate(vg, t.angle)
+        local barrelPaint = nvgLinearGradient(vg, 0, -3, 0, 3,
+            nvgRGBA(200, 210, 220, 255),
+            nvgRGBA(80, 90, 100, 255))
+        for offY = -3, 3, 6 do
+            nvgBeginPath(vg)
+            nvgRoundedRect(vg, 4, offY - 1.5, 18, 3, 1)
+            nvgFillPaint(vg, barrelPaint)
+            nvgFill(vg)
+        end
+        -- 中央能量管
+        local energyPulse = 0.5 + 0.5 * math.sin(time * 12)
+        nvgBeginPath(vg)
+        nvgRect(vg, 6, -1, 14, 2)
+        nvgFillColor(vg, nvgRGBA(120, 220, 255, math.floor(180 + 70 * energyPulse)))
+        nvgFill(vg)
+        -- 炮口聚能光
+        local muzzlePaint = nvgRadialGradient(vg, 22, 0, 0, 8,
+            nvgRGBA(255, 240, 200, math.floor(220 * energyPulse)),
+            nvgRGBA(255, 200, 100, 0))
+        nvgBeginPath(vg)
+        nvgCircle(vg, 22, 0, 8)
+        nvgFillPaint(vg, muzzlePaint)
+        nvgFill(vg)
+        nvgBeginPath(vg)
+        nvgCircle(vg, 22, 0, 2.5)
+        nvgFillColor(vg, nvgRGBA(255, 255, 220, 255))
+        nvgFill(vg)
+        nvgRestore(vg)
+
+        -- 6. 顶部脉冲信号灯（双层）
+        local lampPulse = 0.5 + 0.5 * math.sin(time * 7)
+        local lampPaint = nvgRadialGradient(vg, t.x, t.y - 2, 1, 9,
+            nvgRGBA(255, 80, 80, math.floor(200 + 55 * lampPulse)),
+            nvgRGBA(255, 30, 30, 0))
+        nvgBeginPath(vg)
+        nvgCircle(vg, t.x, t.y - 2, 9)
+        nvgFillPaint(vg, lampPaint)
+        nvgFill(vg)
+        nvgBeginPath(vg)
+        nvgCircle(vg, t.x, t.y - 2, 3)
+        nvgFillColor(vg, nvgRGBA(255, 200, 200, 255))
+        nvgFill(vg)
+        nvgBeginPath(vg)
+        nvgCircle(vg, t.x - 1, t.y - 3, 1.2)
+        nvgFillColor(vg, nvgRGBA(255, 255, 255, 255))
+        nvgFill(vg)
+    end
+end
+
+-- ============================================================================
+-- 圣物：炼狱核心爆炸（华丽火球+冲击波+热扭曲环）
+-- ============================================================================
+function RW.DrawInfernoBlasts()
+    if not G.infernoBlasts then return end
+    local vg = G.vg
+    for _, b in ipairs(G.infernoBlasts) do
+        local t = 1 - b.life / b.maxLife  -- 0->1 进度
+        local alpha = b.life / b.maxLife
+        local R = b.radius
+        local growR = R * (0.3 + 0.9 * t)
+
+        -- 1. 外部冲击波环（白热）
+        local shockA = math.floor(255 * alpha * (1 - t * 0.5))
+        nvgBeginPath(vg)
+        nvgCircle(vg, b.x, b.y, growR)
+        nvgStrokeColor(vg, nvgRGBA(255, 240, 180, shockA))
+        nvgStrokeWidth(vg, 4 + 2 * (1 - t))
+        nvgStroke(vg)
+        -- 第二道冲击波（橙红，稍滞后）
+        local lagR = R * (0.15 + 0.75 * t)
+        nvgBeginPath(vg)
+        nvgCircle(vg, b.x, b.y, lagR)
+        nvgStrokeColor(vg, nvgRGBA(255, 100, 30, math.floor(shockA * 0.8)))
+        nvgStrokeWidth(vg, 5)
+        nvgStroke(vg)
+
+        -- 2. 主火球（径向渐变）
+        local coreR = R * 0.7 * (1 - t * 0.3)
+        local corePaint = nvgRadialGradient(vg, b.x, b.y, 0, coreR,
+            nvgRGBA(255, 255, 220, math.floor(255 * alpha)),
+            nvgRGBA(255, 60, 0, 0))
+        nvgBeginPath(vg)
+        nvgCircle(vg, b.x, b.y, coreR)
+        nvgFillPaint(vg, corePaint)
+        nvgFill(vg)
+
+        -- 3. 内核白热点
+        local innerR = R * 0.25 * math.max(0, 1 - t * 1.5)
+        if innerR > 0.5 then
+            nvgBeginPath(vg)
+            nvgCircle(vg, b.x, b.y, innerR)
+            nvgFillColor(vg, nvgRGBA(255, 255, 240, math.floor(255 * alpha)))
+            nvgFill(vg)
+        end
+
+        -- 4. 火焰花瓣（程序化锯齿轮廓，旋转扩散）
+        local petalCount = 12
+        local petalA = math.floor(255 * alpha * 0.85)
+        nvgSave(vg)
+        nvgTranslate(vg, b.x, b.y)
+        nvgRotate(vg, b.ringPhase * 2.0)
+        nvgBeginPath(vg)
+        for k = 0, petalCount - 1 do
+            local angle = (k / petalCount) * math.pi * 2
+            local petalR = growR * (0.7 + 0.3 * math.sin(k * 1.3 + b.ringPhase * 4))
+            local x1 = math.cos(angle) * petalR
+            local y1 = math.sin(angle) * petalR
+            if k == 0 then nvgMoveTo(vg, x1, y1) else nvgLineTo(vg, x1, y1) end
+        end
+        nvgClosePath(vg)
+        nvgFillColor(vg, nvgRGBA(255, 140, 30, math.floor(petalA * 0.4)))
+        nvgFill(vg)
+        nvgStrokeColor(vg, nvgRGBA(255, 200, 80, petalA))
+        nvgStrokeWidth(vg, 2)
+        nvgStroke(vg)
+        nvgRestore(vg)
+
+        -- 5. 热扭曲环（晚期出现的暗红）
+        if t > 0.4 then
+            local distR = R * (1.0 + 0.3 * (t - 0.4))
+            local distortPaint = nvgRadialGradient(vg, b.x, b.y, distR * 0.7, distR * 1.1,
+                nvgRGBA(120, 30, 0, math.floor(60 * alpha)),
+                nvgRGBA(120, 30, 0, 0))
+            nvgBeginPath(vg)
+            nvgCircle(vg, b.x, b.y, distR * 1.1)
+            nvgFillPaint(vg, distortPaint)
+            nvgFill(vg)
+        end
+    end
+end
+
+-- ============================================================================
+-- 圣物：极寒脉冲（扩张冰环）
+-- ============================================================================
+function RW.DrawFrostNova()
+    if not G.frostNovaPulses then return end
+    local vg = G.vg
+    for _, p in ipairs(G.frostNovaPulses) do
+        local t = p.life / p.duration
+        local alpha = math.floor(255 * t)
+        local r = p.currentR
+        if r > 1 then
+            -- 外环
+            nvgBeginPath(vg)
+            nvgCircle(vg, p.x, p.y, r)
+            nvgStrokeColor(vg, nvgRGBA(180, 230, 255, alpha))
+            nvgStrokeWidth(vg, 4)
+            nvgStroke(vg)
+            -- 内环（亮）
+            nvgBeginPath(vg)
+            nvgCircle(vg, p.x, p.y, r - 3)
+            nvgStrokeColor(vg, nvgRGBA(240, 250, 255, math.floor(alpha * 0.6)))
+            nvgStrokeWidth(vg, 1.5)
+            nvgStroke(vg)
+            -- 径向发光
+            local paint = nvgRadialGradient(vg, p.x, p.y, r - 8, r + 6,
+                nvgRGBA(120, 200, 255, math.floor(alpha * 0.35)),
+                nvgRGBA(120, 200, 255, 0))
+            nvgBeginPath(vg)
+            nvgCircle(vg, p.x, p.y, r + 6)
+            nvgFillPaint(vg, paint)
+            nvgFill(vg)
+        end
+    end
+end
+
+-- ============================================================================
+-- 圣物：风暴召唤者（雷击柱）
+-- ============================================================================
+function RW.DrawStormBolts()
+    if not G.stormBolts then return end
+    local vg = G.vg
+    for _, b in ipairs(G.stormBolts) do
+        if b.delay > 0 then
+            -- 预警圈
+            local warn = math.floor(255 * (1 - b.delay / 0.32))
+            nvgBeginPath(vg)
+            nvgCircle(vg, b.x, b.y, b.radius)
+            nvgStrokeColor(vg, nvgRGBA(200, 220, 255, warn))
+            nvgStrokeWidth(vg, 2)
+            nvgStroke(vg)
+            nvgBeginPath(vg)
+            nvgCircle(vg, b.x, b.y, b.radius * 0.4)
+            nvgFillColor(vg, nvgRGBA(180, 200, 255, math.floor(warn * 0.3)))
+            nvgFill(vg)
+        elseif b.detonated and b.life > 0 then
+            local t = b.life / b.maxLife
+            local alpha = math.floor(255 * t)
+            -- 雷柱（从天而降的折线）
+            local segs = 8
+            local px, py = b.x + (math.random() - 0.5) * 6, b.y - 240
+            nvgBeginPath(vg)
+            nvgMoveTo(vg, px, py)
+            for k = 1, segs do
+                local prog = k / segs
+                local nx = b.x + (math.random() - 0.5) * 14 * (1 - prog)
+                local ny = b.y - 240 * (1 - prog)
+                nvgLineTo(vg, nx, ny)
+                px, py = nx, ny
+            end
+            nvgLineTo(vg, b.x, b.y)
+            nvgStrokeColor(vg, nvgRGBA(220, 230, 255, alpha))
+            nvgStrokeWidth(vg, 3)
+            nvgStroke(vg)
+            -- 外发光（粗）
+            nvgBeginPath(vg)
+            nvgMoveTo(vg, b.x, b.y - 240)
+            nvgLineTo(vg, b.x, b.y)
+            nvgStrokeColor(vg, nvgRGBA(140, 180, 255, math.floor(alpha * 0.4)))
+            nvgStrokeWidth(vg, 10)
+            nvgStroke(vg)
+            -- 落地光圈
+            local paint = nvgRadialGradient(vg, b.x, b.y, 0, b.radius,
+                nvgRGBA(220, 230, 255, math.floor(alpha * 0.6)),
+                nvgRGBA(80, 120, 255, 0))
+            nvgBeginPath(vg)
+            nvgCircle(vg, b.x, b.y, b.radius)
+            nvgFillPaint(vg, paint)
+            nvgFill(vg)
+        end
     end
 end
 

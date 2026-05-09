@@ -126,85 +126,31 @@ function RH.DrawWaveCleared(w, h)
     nvgText(vg, w / 2, h / 2 + 16,
         "Wave " .. WM.currentWave .. " 「" .. desc .. "」 完成", nil)
 
-    local remaining = math.max(0, math.ceil(WM.phaseTimer))
-    nvgFontSize(vg, 12)
-    nvgFillColor(vg, nvgRGBA(180, 180, 180, 180))
-    nvgText(vg, w / 2, h / 2 + 44,
-        remaining .. " 秒后开放出口...", nil)
-end
-
---- 出口方向指示器
-function RH.DrawExitIndicator(w, h)
-    if not WM.exitReady then return end
-    local vg = G.vg
-    local player = G.player
-    local camX, camY, camZoom = G.camX, G.camY, G.camZoom
-
+    -- 倒计时 / 按空格提示
     local t = GetTime():GetElapsedTime()
-
-    local exitScreenX = (WM.exitX - camX) * camZoom
-    local exitScreenY = (WM.exitY - camY) * camZoom
-
-    local margin = 60
-    local onScreen = exitScreenX > margin and exitScreenX < w - margin
-                 and exitScreenY > margin and exitScreenY < h - margin
-
-    local playerScreenX = (player.x - camX) * camZoom
-    local playerScreenY = (player.y - camY) * camZoom
-
-    local angle = math.atan(exitScreenY - playerScreenY, exitScreenX - playerScreenX)
-    local dist = math.sqrt((WM.exitX - player.x)^2 + (WM.exitY - player.y)^2)
-
-    if not onScreen then
-        local arrowDist = math.min(w, h) * 0.4
-        local ax = w / 2 + math.cos(angle) * arrowDist
-        local ay = h / 2 + math.sin(angle) * arrowDist
-        ax = math.max(40, math.min(w - 40, ax))
-        ay = math.max(40, math.min(h - 40, ay))
-
-        local pulse = 0.7 + 0.3 * math.sin(t * 4)
-        local arrowAlpha = math.floor(220 * pulse)
-
+    nvgFontSize(vg, 14)
+    if WM.canAdvance then
+        local advPulse = 0.6 + 0.4 * math.sin(t * 4)
+        local promptAlpha = math.floor(255 * advPulse)
+        local glow = nvgRadialGradient(vg, w/2, h/2 + 76, 10, 200,
+            nvgRGBA(255, 230, 80, math.floor(60 * advPulse)),
+            nvgRGBA(255, 230, 80, 0))
         nvgBeginPath(vg)
-        nvgCircle(vg, ax, ay, 18)
-        nvgFillColor(vg, nvgRGBA(0, 0, 0, 140))
+        nvgRect(vg, 0, h/2 + 50, w, 80)
+        nvgFillPaint(vg, glow)
         nvgFill(vg)
 
-        nvgSave(vg)
-        nvgTranslate(vg, ax, ay)
-        nvgRotate(vg, angle)
-        nvgBeginPath(vg)
-        nvgMoveTo(vg, 12, 0)
-        nvgLineTo(vg, -6, -8)
-        nvgLineTo(vg, -6, 8)
-        nvgClosePath(vg)
-        nvgFillColor(vg, nvgRGBA(80, 255, 120, arrowAlpha))
-        nvgFill(vg)
-        nvgRestore(vg)
-
-        local distText = math.floor(dist / TILE_SIZE) .. "m"
-        nvgFontFace(vg, "sans")
-        nvgFontSize(vg, 10)
-        nvgTextAlign(vg, NVG_ALIGN_CENTER + NVG_ALIGN_MIDDLE)
-        nvgFillColor(vg, nvgRGBA(200, 255, 200, arrowAlpha))
-        nvgText(vg, ax, ay + 24, distText, nil)
-    end
-
-    local hintPulse = 0.6 + 0.4 * math.sin(t * 3)
-    nvgFontFace(vg, "sans")
-    nvgFontSize(vg, 16)
-    nvgTextAlign(vg, NVG_ALIGN_CENTER + NVG_ALIGN_MIDDLE)
-
-    if WM.phase == WM.PHASE_WALKOUT then
-        nvgFillColor(vg, nvgRGBA(80, 255, 120, math.floor(255 * hintPulse)))
-        nvgText(vg, w / 2, 48, "正在撤离...", nil)
+        nvgFontSize(vg, 18)
+        nvgFillColor(vg, nvgRGBA(255, 230, 100, promptAlpha))
+        if G.isMobile then
+            nvgText(vg, w / 2, h / 2 + 76, "▶ 点击屏幕进入下一关 ▶", nil)
+        else
+            nvgText(vg, w / 2, h / 2 + 76, "▶ 按 [空格] 进入下一关 ▶", nil)
+        end
     else
-        nvgFillColor(vg, nvgRGBA(80, 255, 120, math.floor(200 * hintPulse)))
-        nvgText(vg, w / 2, 48, "前往出口撤离!", nil)
-
-        nvgFontSize(vg, 12)
-        nvgFillColor(vg, nvgRGBA(180, 220, 180, 180))
-        nvgText(vg, w / 2, 68, math.floor(dist / TILE_SIZE) .. " 米", nil)
+        local remaining = math.max(0, math.ceil(WM.phaseTimer))
+        nvgFillColor(vg, nvgRGBA(180, 180, 180, 180))
+        nvgText(vg, w / 2, h / 2 + 44, "整理战场中... " .. remaining .. " 秒", nil)
     end
 end
 

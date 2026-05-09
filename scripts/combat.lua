@@ -126,15 +126,18 @@ function Combat.TryShoot()
             pelletDamage = math.max(1, math.floor(finalDamage * 0.7))
         end
 
-        -- 计算子弹视觉类型(优先级: explosive > shock > burn > frost > pierce > bounce > shotgun > normal)
+        -- 计算子弹视觉类型 + 多层特效叠加
+        -- bulletFx 保留为"主特效"用于命中粒子等回退路径；fxLayers 用于渲染叠加
         local bfx = "normal"
-        if shotgunPellets > 0 then bfx = "shotgun" end
-        if bounceCount > 0 then bfx = "bounce" end
-        if pierceCount > 0 then bfx = "pierce" end
-        if slowAmt > 0 then bfx = "frost" end
-        if burnDmg > 0 then bfx = "burn" end
-        if shockChance > 0 then bfx = "shock" end
-        if explRadius > 0 then bfx = "explosive" end
+        local fxLayers = {}
+        if shotgunPellets > 0 then bfx = "shotgun"; table.insert(fxLayers, "shotgun") end
+        if bounceCount > 0 then bfx = "bounce"; table.insert(fxLayers, "bounce") end
+        if pierceCount > 0 then bfx = "pierce"; table.insert(fxLayers, "pierce") end
+        if slowAmt > 0 then bfx = "frost"; table.insert(fxLayers, "frost") end
+        if burnDmg > 0 then bfx = "burn"; table.insert(fxLayers, "burn") end
+        if shockChance > 0 then bfx = "shock"; table.insert(fxLayers, "shock") end
+        if explRadius > 0 then bfx = "explosive"; table.insert(fxLayers, "explosive") end
+        if #fxLayers == 0 then table.insert(fxLayers, "normal") end
 
         table.insert(G.bullets, {
             x = bx, y = by,
@@ -150,6 +153,7 @@ function Combat.TryShoot()
             bounceCount = bounceCount,
             hitEnemies = {},
             bulletFx = bfx,
+            fxLayers = fxLayers,
             -- 感电属性(链式闪电)
             shockChance = shockChance > 0 and shockChance or nil,
             shockDamage = shockDamage > 0 and shockDamage or nil,
@@ -451,6 +455,7 @@ function Combat.UpdateDrones(dt)
                 bounceCount = 0,
                 hitEnemies = {},
                 bulletFx = "shock",  -- 无人机子弹使用电弧视觉
+                fxLayers = {"shock"},
                 isDrone = true,
             })
             -- 微型枪口闪光
@@ -463,6 +468,506 @@ function Combat.UpdateDrones(dt)
             })
         end
     end
+end
+
+-- ============================================================================
+-- 高级圣物运行时逻辑
+-- ============================================================================
+
+-- 状态计时器（首次访问时初始化）
+local function initRelicState()
+    if not G.frostNovaTimer then G.frostNovaTimer = 0 end
+    if not G.frostNovaPulses then G.frostNovaPulses = {} end
+    if not G.stormTimer then G.stormTimer = 0 end
+    if not G.stormBolts then G.stormBolts = {} end
+    if not G.turretEntities then G.turretEntities = {} end
+    if not G.turretSpawned then G.turretSpawned = false end
+    if not G.phoenixUsed then G.phoenixUsed = false end
+    if not G.phoenixAuraTimer then G.phoenixAuraTimer = 0 end
+end
+
+-- ===== 极寒脉冲 =====
+function Combat.UpdateFrostNova(dt)
+    initRelicState()
+    local radius = Inv.GetStat("frostNovaRadius", 0)
+    local damage = Inv.GetStat("frostNovaDamage", 0)
+    local slowAmt = Inv.GetStat("slowAmount", 0)
+    if radius <= 0 or damage <= 0 then
+        G.frostNovaTimer = 0
+        return
+    end
+    if not G.player.alive then return end
+
+    G.frostNovaTimer = G.frostNovaTimer + dt
+    local interval = 10.0
+    if G.frostNovaTimer >= interval then
+        G.frostNovaTimer = 0
+        -- 触发脉冲：扩张冰环
+        table.insert(G.frostNovaPulses, {
+            x = G.player.x, y = G.player.y,
+            currentR = 0, maxR = radius,
+            duration = 0.6, life = 0.6,
+            damage = damage, slow = slowAmt,
+            hitSet = {},
+        })
+        G.PlaySfx(G.sndFrostHit, 0.7)
+        -- 中心闪光
+        table.insert(G.particles, {
+            x = G.player.x, y = G.player.y, vx = 0, vy = 0,
+            life = 0.18, maxLife = 0.18,
+            r = 220, g = 240, b = 255,
+            size = 30, glow = true, drag = 1.0,
+        })
+    end
+
+    -- 推进每个脉冲
+    for i = #G.frostNovaPulses, 1, -1 do
+        local p = G.frostNovaPulses[i]
+        local prevR = p.currentR
+        p.life = p.life - dt
+        local progress = 1 - p.life / p.duration
+        p.currentR = p.maxR * progress
+
+        -- 击中扇区：环上的敌人（在 prevR..currentR 之间且未命中过）
+        for _, e in ipairs(G.enemies) do
+            if not e.dead and not p.hitSet[e] then
+                local dx = e.x - p.x
+                local dy = e.y - p.y
+                local d = math.sqrt(dx*dx + dy*dy)
+                if d >= prevR and d <= p.currentR then
+                    p.hitSet[e] = true
+                    local dmg = p.damage
+                    if e.armor and e.armor > 0 then
+                        dmg = math.max(1, math.floor(dmg * (1 - e.armor)))
+                    end
+                    e.hp = e.hp - dmg
+                    e.hitFlashTimer = 0.1
+                    -- 减速/冰冻
+                    e.slowTimer = 2.5
+                    e.slowPercent = math.min(0.9, p.slow / 100)
+                    table.insert(G.damageNumbers, {
+                        x = e.x, y = e.y - e.radius - 5,
+                        text = tostring(dmg),
+                        life = 0.7, maxLife = 0.7, vy = -35,
+                        isFrost = true,
+                    })
+                    -- 冰晶碎片
+                    for k = 1, 4 do
+                        local pa = math.random() * math.pi * 2
+                        table.insert(G.particles, {
+                            x = e.x, y = e.y,
+                            vx = math.cos(pa) * 50, vy = math.sin(pa) * 50,
+                            life = 0.4, maxLife = 0.4,
+                            r = 200, g = 230, b = 255,
+                            size = 2, glow = true,
+                        })
+                    end
+                    if e.hp <= 0 then
+                        e.dead = true
+                        G.killCount = G.killCount + 1
+                        WM.OnEnemyKilled()
+                        G.score = G.score + 50
+                    end
+                end
+            end
+        end
+
+        if p.life <= 0 then table.remove(G.frostNovaPulses, i) end
+    end
+end
+
+-- ===== 风暴召唤者 =====
+function Combat.UpdateStorm(dt)
+    initRelicState()
+    local interval = Inv.GetStat("stormInterval", 0)
+    local stormDmg = Inv.GetStat("stormDamage", 0)
+    local stormR = Inv.GetStat("stormRadius", 0)
+    if interval <= 0 or stormDmg <= 0 then
+        G.stormTimer = 0
+        return
+    end
+    if not G.player.alive then return end
+
+    G.stormTimer = G.stormTimer + dt
+    if G.stormTimer >= interval then
+        G.stormTimer = 0
+        -- 选择 5 个随机敌人作为雷击目标
+        local targets = {}
+        for _, e in ipairs(G.enemies) do
+            if not e.dead then
+                local dx = e.x - G.player.x
+                local dy = e.y - G.player.y
+                if math.sqrt(dx*dx + dy*dy) < 600 then
+                    table.insert(targets, e)
+                end
+            end
+        end
+        local boltCount = math.min(5, #targets)
+        for i = 1, boltCount do
+            -- 随机抽取
+            local idx = math.random(1, #targets)
+            local e = targets[idx]
+            table.remove(targets, idx)
+            table.insert(G.stormBolts, {
+                target = e, x = e.x, y = e.y,
+                delay = (i - 1) * 0.08,
+                life = 0.35, maxLife = 0.35,
+                damage = stormDmg, radius = stormR,
+                detonated = false,
+            })
+        end
+        G.PlaySfx(G.sndChainLightning, 0.8)
+    end
+
+    -- 推进雷击
+    for i = #G.stormBolts, 1, -1 do
+        local b = G.stormBolts[i]
+        b.delay = b.delay - dt
+        if b.delay <= 0 then
+            if not b.detonated then
+                b.detonated = true
+                -- AOE 伤害
+                for _, e in ipairs(G.enemies) do
+                    if not e.dead then
+                        local dx = e.x - b.x
+                        local dy = e.y - b.y
+                        local d = math.sqrt(dx*dx + dy*dy)
+                        if d < b.radius then
+                            local dmg = b.damage
+                            if e.armor and e.armor > 0 then
+                                dmg = math.max(1, math.floor(dmg * (1 - e.armor)))
+                            end
+                            e.hp = e.hp - dmg
+                            e.hitFlashTimer = 0.1
+                            table.insert(G.damageNumbers, {
+                                x = e.x, y = e.y - e.radius - 5,
+                                text = tostring(dmg),
+                                life = 0.8, maxLife = 0.8, vy = -40,
+                                isShock = true,
+                            })
+                            if e.hp <= 0 then
+                                e.dead = true
+                                G.killCount = G.killCount + 1
+                                WM.OnEnemyKilled()
+                                G.score = G.score + 50
+                            end
+                        end
+                    end
+                end
+                -- 雷击中心爆裂
+                for k = 1, 16 do
+                    local pa = math.random() * math.pi * 2
+                    local spd = 80 + math.random() * 120
+                    table.insert(G.particles, {
+                        x = b.x, y = b.y,
+                        vx = math.cos(pa) * spd, vy = math.sin(pa) * spd,
+                        life = 0.3, maxLife = 0.3,
+                        r = 180 + math.random(70), g = 180, b = 255,
+                        size = 3, glow = true, drag = 0.92,
+                    })
+                end
+                table.insert(G.particles, {
+                    x = b.x, y = b.y, vx = 0, vy = 0,
+                    life = 0.25, maxLife = 0.25,
+                    r = 255, g = 255, b = 255,
+                    size = b.radius * 0.6, glow = true, drag = 1.0,
+                })
+                G.PlaySfx(G.sndChainLightning, 0.4)
+            end
+            b.life = b.life - dt
+            if b.life <= 0 then table.remove(G.stormBolts, i) end
+        end
+    end
+end
+
+-- ===== 自动炮台 =====
+function Combat.UpdateTurret(dt)
+    initRelicState()
+    local tDmg = Inv.GetStat("turretDamage", 0)
+    local tRange = Inv.GetStat("turretRange", 0)
+    local tRate = Inv.GetStat("turretRate", 0)
+    if tDmg <= 0 or tRange <= 0 then
+        G.turretEntities = {}
+        G.turretSpawned = false
+        return
+    end
+    if not G.player.alive then return end
+
+    -- 首次出现：在玩家附近部署
+    if not G.turretSpawned then
+        G.turretSpawned = true
+        G.turretEntities = {{
+            x = G.player.x + 30, y = G.player.y + 10,
+            angle = 0, fireTimer = 0,
+        }}
+    end
+
+    for _, t in ipairs(G.turretEntities) do
+        -- 平滑跟随玩家（保持距离 40）
+        local dx = G.player.x + 30 - t.x
+        local dy = G.player.y + 10 - t.y
+        t.x = t.x + dx * dt * 3
+        t.y = t.y + dy * dt * 3
+
+        -- 寻找最近敌人
+        local best, bestD = nil, tRange
+        for _, e in ipairs(G.enemies) do
+            if not e.dead then
+                local edx = e.x - t.x
+                local edy = e.y - t.y
+                local d = math.sqrt(edx*edx + edy*edy)
+                if d < bestD then
+                    bestD = d
+                    best = e
+                end
+            end
+        end
+
+        t.fireTimer = t.fireTimer - dt
+        if best and t.fireTimer <= 0 then
+            t.fireTimer = tRate
+            t.angle = math.atan(best.y - t.y, best.x - t.x)
+            local TURRET_BSPD = 460
+            table.insert(G.bullets, {
+                x = t.x + math.cos(t.angle) * 8,
+                y = t.y + math.sin(t.angle) * 8,
+                vx = math.cos(t.angle) * TURRET_BSPD,
+                vy = math.sin(t.angle) * TURRET_BSPD,
+                damage = tDmg, radius = 3,
+                fromPlayer = true, life = 1.0,
+                trail = {}, isCrit = false,
+                pierce = 0, bounceCount = 0,
+                hitEnemies = {},
+                bulletFx = "normal",
+                fxLayers = {"normal"},
+                isTurret = true,
+            })
+            G.PlaySfx(G.sndDroneShoot, 0.2)
+        end
+    end
+end
+
+-- ===== 不死鸟之羽：燃烧光环 =====
+function Combat.UpdatePhoenix(dt)
+    initRelicState()
+    local burnAura = Inv.GetStat("burnAura", 0)
+    if burnAura <= 0 then return end
+    if not G.player.alive then return end
+
+    G.phoenixAuraTimer = G.phoenixAuraTimer + dt
+    -- 每 0.5 秒对周围敌人施加燃烧
+    if G.phoenixAuraTimer >= 0.5 then
+        G.phoenixAuraTimer = 0
+        local AURA_R = 90
+        for _, e in ipairs(G.enemies) do
+            if not e.dead then
+                local dx = e.x - G.player.x
+                local dy = e.y - G.player.y
+                if math.sqrt(dx*dx + dy*dy) < AURA_R then
+                    e.burnTimer = math.max(e.burnTimer or 0, 1.5)
+                    e.burnDamage = math.max(e.burnDamage or 0, burnAura)
+                    e.burnTickTimer = e.burnTickTimer or 0
+                end
+            end
+        end
+        -- 视觉：火星粒子绕玩家
+        for k = 1, 6 do
+            local pa = math.random() * math.pi * 2
+            table.insert(G.particles, {
+                x = G.player.x + math.cos(pa) * 80,
+                y = G.player.y + math.sin(pa) * 80,
+                vx = -math.cos(pa) * 30, vy = -math.sin(pa) * 30 - 20,
+                life = 0.5, maxLife = 0.5,
+                r = 255, g = 140 + math.random(60), b = 30,
+                size = 2 + math.random() * 1.5, glow = true,
+            })
+        end
+    end
+end
+
+-- ===== 不死鸟之羽：复活检测（由玩家死亡逻辑调用）=====
+function Combat.TryPhoenixRevive()
+    initRelicState()
+    if G.phoenixUsed then return false end
+    local revive = Inv.GetStat("revive", 0)
+    if revive <= 0 then return false end
+    G.phoenixUsed = true
+    G.player.alive = true
+    G.player.hp = math.floor((G.player.maxHp or 100) * 0.6)
+    G.player.invincibleTimer = 2.0
+    G.PlaySfx(G.sndShieldAbsorb, 0.8)
+    G.PlaySfx(G.sndLevelClear, 0.6)
+    -- 复活爆发：金色火羽爆裂
+    for k = 1, 60 do
+        local pa = (k / 60) * math.pi * 2
+        local spd = 120 + math.random() * 180
+        table.insert(G.particles, {
+            x = G.player.x, y = G.player.y,
+            vx = math.cos(pa) * spd, vy = math.sin(pa) * spd,
+            life = 0.6 + math.random() * 0.4, maxLife = 1.0,
+            r = 255, g = 180 + math.random(75), b = 50,
+            size = 3 + math.random() * 2, glow = true, drag = 0.94,
+        })
+    end
+    table.insert(G.particles, {
+        x = G.player.x, y = G.player.y, vx = 0, vy = 0,
+        life = 0.4, maxLife = 0.4,
+        r = 255, g = 220, b = 100, size = 80,
+        glow = true, drag = 1.0,
+    })
+    return true
+end
+
+-- ===== 炼狱核心：燃烧结束爆炸（由 enemy 燃烧伤害逻辑调用）=====
+function Combat.TryInfernoExplosion(e)
+    if not Inv.GetStat("explosionOnBurn", false) then return end
+    if not e or e.dead then return end
+    local burnDmg = e.burnDamage or 10
+    local R = 90
+    local explDmg = math.floor(burnDmg * 2.2)
+    -- 推入华丽爆炸动画队列（render_world 渲染）
+    if not G.infernoBlasts then G.infernoBlasts = {} end
+    table.insert(G.infernoBlasts, {
+        x = e.x, y = e.y,
+        radius = R,
+        life = 0.55, maxLife = 0.55,
+        ringPhase = 0,
+    })
+    -- 镜头震动 + 命中停顿
+    G.shakeAmount = math.max(G.shakeAmount or 0, 8)
+    G.shakeTimer = math.max(G.shakeTimer or 0, 0.25)
+    G.hitstopTimer = math.max(G.hitstopTimer or 0, 0.05)
+    -- AOE 伤害
+    for _, e2 in ipairs(G.enemies) do
+        if e2 ~= e and not e2.dead then
+            local dx = e2.x - e.x
+            local dy = e2.y - e.y
+            local d = math.sqrt(dx*dx + dy*dy)
+            if d < R then
+                local dmg = math.floor(explDmg * (1 - d / R))
+                if e2.armor and e2.armor > 0 then
+                    dmg = math.max(1, math.floor(dmg * (1 - e2.armor)))
+                end
+                if dmg > 0 then
+                    e2.hp = e2.hp - dmg
+                    e2.hitFlashTimer = 0.1
+                    -- 传播燃烧
+                    e2.burnTimer = math.max(e2.burnTimer or 0, 1.0)
+                    e2.burnDamage = math.max(e2.burnDamage or 0, math.floor(burnDmg * 0.6))
+                    e2.burnTickTimer = e2.burnTickTimer or 0
+                    table.insert(G.damageNumbers, {
+                        x = e2.x, y = e2.y - e2.radius - 5,
+                        text = tostring(dmg),
+                        life = 0.7, maxLife = 0.7, vy = -35,
+                        isAoe = true,
+                    })
+                    if e2.hp <= 0 then
+                        e2.dead = true
+                        G.killCount = G.killCount + 1
+                        WM.OnEnemyKilled()
+                        G.score = G.score + 50
+                    end
+                end
+            end
+        end
+    end
+    -- 视觉：华丽炼狱爆炸
+    G.PlaySfx(G.sndExplosion, 0.6)
+    -- 中心强光
+    table.insert(G.particles, {
+        x = e.x, y = e.y, vx = 0, vy = 0,
+        life = 0.25, maxLife = 0.25,
+        r = 255, g = 240, b = 180, size = R * 1.1,
+        glow = true, drag = 1.0,
+    })
+    -- 内核（白热）
+    table.insert(G.particles, {
+        x = e.x, y = e.y, vx = 0, vy = 0,
+        life = 0.18, maxLife = 0.18,
+        r = 255, g = 255, b = 220, size = R * 0.55,
+        glow = true, drag = 1.0,
+    })
+    -- 火焰花瓣（多层环）
+    for ring = 1, 3 do
+        local count = 14 + ring * 6
+        local baseSpd = 120 + ring * 80
+        for k = 1, count do
+            local pa = (k / count) * math.pi * 2 + math.random() * 0.2
+            local spd = baseSpd + math.random() * 100
+            table.insert(G.particles, {
+                x = e.x, y = e.y,
+                vx = math.cos(pa) * spd, vy = math.sin(pa) * spd,
+                life = 0.45 + math.random() * 0.35, maxLife = 0.8,
+                r = 255,
+                g = 80 + math.random(140),
+                b = 10 + math.random(60),
+                size = 4 + math.random() * 4,
+                glow = true, drag = 0.88,
+            })
+        end
+    end
+    -- 飞溅余烬（高速亮黄）
+    for k = 1, 24 do
+        local pa = math.random() * math.pi * 2
+        local spd = 280 + math.random() * 220
+        table.insert(G.particles, {
+            x = e.x, y = e.y,
+            vx = math.cos(pa) * spd, vy = math.sin(pa) * spd,
+            life = 0.6 + math.random() * 0.4, maxLife = 1.0,
+            r = 255, g = 220 + math.random(35), b = 80 + math.random(100),
+            size = 1.5 + math.random() * 1.5, glow = true, drag = 0.93,
+        })
+    end
+    -- 上升黑红浓烟
+    for k = 1, 16 do
+        local pa = math.random() * math.pi * 2
+        local spd = 30 + math.random() * 60
+        table.insert(G.particles, {
+            x = e.x + math.cos(pa) * 8,
+            y = e.y + math.sin(pa) * 8,
+            vx = math.cos(pa) * spd * 0.4,
+            vy = -50 - math.random() * 60,
+            life = 0.8 + math.random() * 0.5, maxLife = 1.3,
+            r = 80 + math.random(60), g = 40 + math.random(40), b = 30,
+            size = 8 + math.random() * 6, glow = false, drag = 0.95,
+        })
+    end
+    -- 地面焦痕（短促闪光块）
+    for k = 1, 8 do
+        local pa = math.random() * math.pi * 2
+        local d = math.random() * R * 0.7
+        table.insert(G.particles, {
+            x = e.x + math.cos(pa) * d,
+            y = e.y + math.sin(pa) * d,
+            vx = 0, vy = 0,
+            life = 0.5, maxLife = 0.5,
+            r = 200, g = 60, b = 20,
+            size = 6, glow = true, drag = 1.0,
+        })
+    end
+end
+
+-- ===== 推进炼狱爆炸动画 =====
+function Combat.UpdateInfernoBlasts(dt)
+    if not G.infernoBlasts then return end
+    for i = #G.infernoBlasts, 1, -1 do
+        local b = G.infernoBlasts[i]
+        b.life = b.life - dt
+        b.ringPhase = b.ringPhase + dt
+        if b.life <= 0 then table.remove(G.infernoBlasts, i) end
+    end
+end
+
+-- ===== 关卡切换时重置炮台/不死鸟使用状态（在 wave 开始时调用）=====
+function Combat.ResetRelicsOnNewWave()
+    initRelicState()
+    G.turretSpawned = false
+    G.turretEntities = {}
+    G.frostNovaTimer = 0
+    G.frostNovaPulses = {}
+    G.stormTimer = 0
+    G.stormBolts = {}
+    -- phoenixUsed 跨关卡保留（一周目只能用一次）
 end
 
 return Combat

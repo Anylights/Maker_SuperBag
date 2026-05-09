@@ -490,7 +490,7 @@ function Bullet.UpdateBullets(dt)
                         if lootRoll <= 70 then
                             table.insert(G.lootItems, {
                                 x = e.x, y = e.y,
-                                type = "ammo", amount = math.random(8, 18),
+                                type = "ammo", amount = math.random(4, 10),
                             })
                         elseif lootRoll <= 85 then
                             table.insert(G.lootItems, {
@@ -622,13 +622,18 @@ function Bullet.UpdateBullets(dt)
                     end
                     G.player.invincibleTimer = 0.3
                     if G.player.hp <= 0 then
-                        G.player.hp = 0
-                        G.player.alive = false
-                        G.gameState = G.STATE_DYING
-                        G.deathAnimTimer = 0
-                        G.deathZoomStart = G.camZoom
-                        G.deathSlowScale = 1.0
-                        G.PlaySfx(G.sndPlayerDeath, 0.6)
+                        local Combat = package.loaded["combat"]
+                        if Combat and Combat.TryPhoenixRevive and Combat.TryPhoenixRevive() then
+                            -- 复活
+                        else
+                            G.player.hp = 0
+                            G.player.alive = false
+                            G.gameState = G.STATE_DYING
+                            G.deathAnimTimer = 0
+                            G.deathZoomStart = G.camZoom
+                            G.deathSlowScale = 1.0
+                            G.PlaySfx(G.sndPlayerDeath, 0.6)
+                        end
                     end
                 end
                 remove = true

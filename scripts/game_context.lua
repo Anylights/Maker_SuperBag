@@ -34,7 +34,7 @@ G.CRATE_CONFIG = {
         ammoChance   = 90,
         healthChance = 85,
         maxRarity = 2,
-        ammoRange = {15, 25},
+        ammoRange = {8, 14},
         healthRange = {15, 30},
     },
     [G.TILE_CRATE_IRON] = {
@@ -43,7 +43,7 @@ G.CRATE_CONFIG = {
         ammoChance   = 80,
         healthChance = 55,
         maxRarity = 3,
-        ammoRange = {25, 40},
+        ammoRange = {14, 22},
         healthRange = {25, 45},
     },
     [G.TILE_CRATE_GOLD] = {
@@ -52,7 +52,7 @@ G.CRATE_CONFIG = {
         ammoChance   = 70,
         healthChance = 30,
         maxRarity = 5,
-        ammoRange = {35, 60},
+        ammoRange = {20, 32},
         healthRange = {35, 60},
     },
 }
@@ -314,14 +314,6 @@ G.hitstopTimer = 0
 G.deathAnimTimer  = 0
 G.deathZoomStart  = 1.3
 G.deathSlowScale  = 1.0
-
--- 走出动画
-G.walkoutStartX   = 0
-G.walkoutStartY   = 0
-G.walkoutTargetX  = 0
-G.walkoutTargetY  = 0
-G.walkoutZoomStart = 0.75
-G.walkoutZoomEnd   = 0.9
 
 -- ============================================================================
 -- 工具函数

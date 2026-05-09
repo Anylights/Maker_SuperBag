@@ -248,6 +248,7 @@ function Start()
 
     -- 输入初始化（始终初始化，自动检测设备类型）
     -- 默认PC模式(G.isMobile=false)；手机浏览器第一次触摸时自动切换为移动端模式
+    G.WM = WM  -- 暴露给 mobile_input 用于检测 PHASE_CLEARED 阶段
     MI.Init()
     MI.onReload = function()
         local p = G.player
@@ -570,9 +571,7 @@ function HandleMouseDown(eventType, eventData)
 
     -- 移动端射击由摇杆处理，不走鼠标路径
     if not G.isMobile and button == MOUSEB_LEFT then
-        if WM.phase ~= WM.PHASE_WALKOUT then
-            Combat.TryShoot()
-        end
+        Combat.TryShoot()
     end
 
     -- 右键冲刺（PC 端）
@@ -878,7 +877,7 @@ function RestartGame()
     player.maxHp = 100
     player.speed = 180
     player.ammo = 12
-    player.totalAmmo = 150
+    player.totalAmmo = 90
     player.alive = true
     player.reloading = false
     player.reloadTimer = 0
@@ -1058,14 +1057,15 @@ function HandleUpdate(eventType, eventData)
         return
     end
 
-    -- 出口开放阶段
-    if WM.phase == WM.PHASE_EXIT_OPEN then
-        if not WM.exitReady then
-            Map.SpawnExit()
-        end
-
+    -- 关卡清除阶段: 玩家可继续移动/射击, 提示按空格推进
+    if WM.phase == WM.PHASE_CLEARED then
         UpdateDash(dt)
         Combat.UpdatePlayer(dt)
+        Combat.UpdateFrostNova(dt)
+        Combat.UpdateStorm(dt)
+        Combat.UpdateTurret(dt)
+        Combat.UpdatePhoenix(dt)
+        Combat.UpdateInfernoBlasts(dt)
         Bullet.UpdateBullets(dt)
         UpdateSearch(dt)
         Fx.UpdateParticles(dt)
@@ -1080,7 +1080,7 @@ function HandleUpdate(eventType, eventData)
             end
         end
 
-        -- 拾取掉落物(出口阶段残留)
+        -- 拾取掉落物
         for i = #G.lootItems, 1, -1 do
             local item = G.lootItems[i]
             if item.type == "artifact" then
@@ -1097,52 +1097,20 @@ function HandleUpdate(eventType, eventData)
             end
         end
 
-        -- 检测玩家到达出口
-        local exitDist = math.sqrt((player.x - WM.exitX)^2 + (player.y - WM.exitY)^2)
-        if exitDist < 40 then
-            WM.phase = WM.PHASE_WALKOUT
-            WM.walkoutTimer = WM.walkoutDuration
-            G.walkoutStartX = player.x
-            G.walkoutStartY = player.y
-            G.walkoutTargetX = WM.exitX
-            G.walkoutTargetY = WM.exitY
-            G.walkoutZoomStart = G.camZoom
-            G.walkoutZoomEnd = math.min(1.0, G.camZoom + 0.15)
-            G.PlaySfx(G.sndPortalEnter, 0.5)
-            G.PlaySfx(G.sndLevelClear, 0.6)
+        -- 等待空格推进
+        if WM.canAdvance and not InvUI.isOpen then
+            local spacePressed = input:GetKeyPress(KEY_SPACE)
+            if G.isMobile and MI.advancePressed then
+                spacePressed = true
+                MI.advancePressed = false
+            end
+            if spacePressed then
+                G.PlaySfx(G.sndPortalEnter, 0.5)
+                G.PlaySfx(G.sndLevelClear, 0.6)
+                WM.canAdvance = false
+                WM.AdvanceToReward()
+            end
         end
-        return
-    end
-
-    -- 走出动画阶段
-    if WM.phase == WM.PHASE_WALKOUT then
-        local progress = 1.0 - (WM.walkoutTimer / WM.walkoutDuration)
-        progress = math.max(0, math.min(1, progress))
-        local ease = progress < 0.5
-            and (2 * progress * progress)
-            or (1 - (-2 * progress + 2)^2 / 2)
-
-        player.x = G.walkoutStartX + (G.walkoutTargetX - G.walkoutStartX) * ease
-        player.y = G.walkoutStartY + (G.walkoutTargetY - G.walkoutStartY) * ease
-        player.angle = math.atan(G.walkoutTargetY - G.walkoutStartY, G.walkoutTargetX - G.walkoutStartX)
-        G.camZoom = G.walkoutZoomStart + (G.walkoutZoomEnd - G.walkoutZoomStart) * ease
-
-        if math.random() < 0.4 then
-            table.insert(G.particles, {
-                x = player.x + (math.random() - 0.5) * 16,
-                y = player.y + (math.random() - 0.5) * 16,
-                vx = (math.random() - 0.5) * 30,
-                vy = -20 - math.random() * 20,
-                life = 0.6 + math.random() * 0.3,
-                maxLife = 0.9,
-                r = 80, g = 255, b = 120,
-                size = 2 + math.random() * 3,
-                drag = 0.95,
-            })
-        end
-
-        Fx.UpdateParticles(dt)
-        UpdateCamera()
         return
     end
 
@@ -1151,9 +1119,6 @@ function HandleUpdate(eventType, eventData)
         G.gameState = G.STATE_VICTORY
         return
     end
-
-    -- 清除展示阶段: 不冻结, 继续正常逻辑
-    -- (WM.Update 会在 phaseTimer 倒计时结束后自动推进到 EXIT_OPEN)
 
     -- 命中停顿
     if G.hitstopTimer > 0 then
@@ -1173,6 +1138,11 @@ function HandleUpdate(eventType, eventData)
 
     Combat.UpdatePlayer(dt)
     Combat.UpdateDrones(dt)
+    Combat.UpdateFrostNova(dt)
+    Combat.UpdateStorm(dt)
+    Combat.UpdateTurret(dt)
+    Combat.UpdatePhoenix(dt)
+    Combat.UpdateInfernoBlasts(dt)
     Bullet.UpdateBullets(dt)
     Enemy.UpdateEnemies(dt)
     Fx.UpdateParticles(dt)
@@ -1203,13 +1173,17 @@ function HandleUpdate(eventType, eventData)
                     isPlayer = true,
                 })
                 if player.hp <= 0 then
-                    player.hp = 0
-                    player.alive = false
-                    G.gameState = G.STATE_DYING
-                    G.deathAnimTimer = 0
-                    G.deathZoomStart = G.camZoom
-                    G.deathSlowScale = 1.0
-                    G.PlaySfx(G.sndPlayerDeath, 0.6)
+                    if Combat.TryPhoenixRevive and Combat.TryPhoenixRevive() then
+                        -- 复活成功，跳过死亡流程
+                    else
+                        player.hp = 0
+                        player.alive = false
+                        G.gameState = G.STATE_DYING
+                        G.deathAnimTimer = 0
+                        G.deathZoomStart = G.camZoom
+                        G.deathSlowScale = 1.0
+                        G.PlaySfx(G.sndPlayerDeath, 0.6)
+                    end
                 end
             end
             for kp = 1, 20 do
@@ -1512,10 +1486,14 @@ function HandleNanoVGRender(eventType, eventData)
 
     RW.DrawMap(DESIGN_W, DESIGN_H)
     RW.DrawLootItems()
+    RW.DrawFrostNova()
     RW.DrawEnemies()
     RW.DrawBullets()
+    RW.DrawTurrets()
     RW.DrawPlayer()
     RW.DrawDrones()
+    RW.DrawStormBolts()
+    RW.DrawInfernoBlasts()
     RW.DrawParticles()
 
     RW.DrawLightningEffects()
@@ -1524,41 +1502,6 @@ function HandleNanoVGRender(eventType, eventData)
     RW.DrawDamageNumbers()
     RW.DrawFogOfWar(DESIGN_W, DESIGN_H)
     RW.DrawSearchProgress()
-
-    -- 出口光柱特效 (世界空间)
-    if (WM.phase == WM.PHASE_EXIT_OPEN or WM.phase == WM.PHASE_WALKOUT) and WM.exitReady then
-        local t = GetTime():GetElapsedTime()
-        local pulse = 0.5 + 0.5 * math.sin(t * 3)
-        local beamAlpha = math.floor(40 + 30 * pulse)
-
-        local beamW = TILE_SIZE * 2
-        local beamH = TILE_SIZE * 6
-        local beamX = WM.exitX - beamW / 2
-        local beamY = WM.exitY - beamH
-
-        local beamGrad = nvgLinearGradient(vg,
-            beamX + beamW / 2, WM.exitY,
-            beamX + beamW / 2, beamY,
-            nvgRGBA(80, 255, 120, beamAlpha),
-            nvgRGBA(80, 255, 120, 0))
-        nvgBeginPath(vg)
-        nvgRect(vg, beamX, beamY, beamW, beamH)
-        nvgFillPaint(vg, beamGrad)
-        nvgFill(vg)
-
-        local ringRadius = TILE_SIZE * 1.5 + 4 * math.sin(t * 2)
-        nvgBeginPath(vg)
-        nvgCircle(vg, WM.exitX, WM.exitY, ringRadius)
-        nvgStrokeColor(vg, nvgRGBA(80, 255, 120, math.floor(100 * pulse)))
-        nvgStrokeWidth(vg, 2)
-        nvgStroke(vg)
-
-        nvgFontFace(vg, "sans")
-        nvgFontSize(vg, 11)
-        nvgTextAlign(vg, NVG_ALIGN_CENTER + NVG_ALIGN_BOTTOM)
-        nvgFillColor(vg, nvgRGBA(80, 255, 120, math.floor(200 * pulse)))
-        nvgText(vg, WM.exitX, WM.exitY - TILE_SIZE * 1.8, "出口", nil)
-    end
 
     nvgRestore(vg)
 
@@ -1625,14 +1568,7 @@ function HandleNanoVGRender(eventType, eventData)
         nvgRestore(vg)
     end
 
-    -- 出口方向指示器
-    if WM.phase == WM.PHASE_EXIT_OPEN or WM.phase == WM.PHASE_WALKOUT then
-        nvgSave(vg)
-        nvgTranslate(vg, G.renderOffsetX, G.renderOffsetY)
-        nvgScale(vg, G.renderScale, G.renderScale)
-        RH.DrawExitIndicator(DESIGN_W, DESIGN_H)
-        nvgRestore(vg)
-    end
+
 
     -- 奖励选择界面
     if WM.phase == WM.PHASE_REWARD then

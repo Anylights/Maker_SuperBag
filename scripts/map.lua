@@ -111,7 +111,7 @@ function Map.GenerateMap()
         end
     end
 
-    -- 保存房间列表(供 SpawnExit 使用)
+    -- 保存房间列表
     G.mapRooms = rooms
 
     -- 玩家出生在第一个房间中心
@@ -125,60 +125,6 @@ function Map.GenerateMap()
     end
 
     print("Map generated: " .. #rooms .. " rooms, " .. crateCount .. " crates")
-end
-
--- ============================================================================
--- 出口生成 (波次清除后调用)
--- ============================================================================
-function Map.SpawnExit()
-    if #G.mapRooms < 2 then
-        -- 只有一个房间: 在房间边缘放出口
-        local room = G.mapRooms[1] or {x = G.MAP_COLS / 2 - 2, y = G.MAP_ROWS / 2 - 2, w = 4, h = 4}
-        local ec = room.x + room.w - 1
-        local er = room.y + room.h - 1
-        G.mapData[er][ec] = G.TILE_EXIT
-        WM.exitX = (ec - 0.5) * G.TILE_SIZE
-        WM.exitY = (er - 0.5) * G.TILE_SIZE
-        WM.exitReady = true
-        return
-    end
-
-    -- 找距离玩家最远的房间
-    local bestDist = -1
-    local bestRoom = nil
-    for _, room in ipairs(G.mapRooms) do
-        local rcx = (room.x + room.w / 2) * G.TILE_SIZE
-        local rcy = (room.y + room.h / 2) * G.TILE_SIZE
-        local dist = math.sqrt((rcx - G.player.x)^2 + (rcy - G.player.y)^2)
-        if dist > bestDist then
-            bestDist = dist
-            bestRoom = room
-        end
-    end
-
-    if not bestRoom then
-        bestRoom = G.mapRooms[#G.mapRooms]
-    end
-
-    -- 在该房间中心放置 3x3 出口区域
-    local centerC = math.floor(bestRoom.x + bestRoom.w / 2)
-    local centerR = math.floor(bestRoom.y + bestRoom.h / 2)
-    for dr = -1, 1 do
-        for dc = -1, 1 do
-            local rr = centerR + dr
-            local cc = centerC + dc
-            if rr >= 1 and rr <= G.MAP_ROWS and cc >= 1 and cc <= G.MAP_COLS then
-                if G.mapData[rr][cc] == G.TILE_FLOOR or G.IsCrateTile(G.mapData[rr][cc]) then
-                    G.mapData[rr][cc] = G.TILE_EXIT
-                end
-            end
-        end
-    end
-
-    WM.exitX = (centerC - 0.5) * G.TILE_SIZE
-    WM.exitY = (centerR - 0.5) * G.TILE_SIZE
-    WM.exitReady = true
-    print("Exit spawned at room center: col=" .. centerC .. " row=" .. centerR)
 end
 
 -- ============================================================================

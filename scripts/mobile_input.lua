@@ -55,6 +55,7 @@ MI.moveDX    = 0     -- 归一化移动方向 [-1, 1]
 MI.moveDY    = 0
 MI.aimAngle  = 0     -- 瞄准弧度
 MI.isShooting = false -- 右摇杆是否激活（自动射击）
+MI.advancePressed = false -- 通关结算时点击屏幕进入下一关（由 main.lua 消费）
 
 -- 按钮回调（由 main.lua 设置）
 MI.onReload  = nil
@@ -121,6 +122,13 @@ function MI_HandleTouchBegin(eventType, eventData)
     local px = eventData["X"]:GetInt()
     local py = eventData["Y"]:GetInt()
     local dx, dy = TouchToDesign(px, py)
+
+    -- 通关结算阶段：任意点击进入下一关
+    local WM = G.WM
+    if WM and WM.canAdvance and WM.phase == WM.PHASE_CLEARED then
+        MI.advancePressed = true
+        return
+    end
 
     -- 先检测按钮
     local btnHit = HitTestButton(dx, dy)

@@ -120,11 +120,11 @@ function Enemy.SpawnEnemies()
                 maxHp = math.floor(t.hp * hpMult),
                 radius = t.radius,
                 speed = t.speed,
-                damage = math.floor(t.damage * dmgMult),
+                damage = math.max(1, math.floor(t.damage * dmgMult * 0.85)),
                 sightRange = t.sightRange,
                 attackRange = t.attackRange,
                 attackRate = t.attackRate,
-                bulletSpeed = t.bulletSpeed,
+                bulletSpeed = t.bulletSpeed * 0.9,
                 color = {t.color[1], t.color[2], t.color[3]},
                 state = "idle",
                 angle = math.random() * math.pi * 2,
@@ -172,11 +172,11 @@ function Enemy.SpawnBossMinions(count)
                 maxHp = math.floor(t.hp * 0.6),
                 radius = t.radius,
                 speed = t.speed,
-                damage = t.damage,
+                damage = math.max(1, math.floor(t.damage * 0.85)),
                 sightRange = t.sightRange,
                 attackRange = t.attackRange,
                 attackRate = t.attackRate,
-                bulletSpeed = t.bulletSpeed,
+                bulletSpeed = t.bulletSpeed * 0.9,
                 color = {t.color[1], t.color[2], t.color[3]},
                 state = "chase",  -- 直接追击
                 angle = math.atan(G.player.y - my, G.player.x - mx),
@@ -292,21 +292,51 @@ function Enemy.UpdateEnemies(dt)
                         life = 0.5, maxLife = 0.5, vy = -25,
                         isBurn = true,
                     })
-                    -- 燃烧火星粒子
-                    for kp = 1, 3 do
+                    -- 燃烧爆发粒子 - 大型火焰团
+                    for kp = 1, 10 do
                         local pa = math.random() * math.pi * 2
+                        local sp = 30 + math.random() * 50
+                        table.insert(G.particles, {
+                            x = e.x + (math.random() - 0.5) * e.radius * 1.2,
+                            y = e.y + (math.random() - 0.5) * e.radius * 1.2,
+                            vx = math.cos(pa) * sp,
+                            vy = -50 - math.random() * 80,
+                            life = 0.5 + math.random() * 0.4, maxLife = 0.9,
+                            r = 255, g = 100 + math.random(120), b = 10 + math.random(40),
+                            size = 3 + math.random() * 3, glow = true,
+                        })
+                    end
+                    -- 高速橙色火星
+                    for kp = 1, 8 do
+                        local pa = math.random() * math.pi * 2
+                        local sp = 70 + math.random() * 90
+                        table.insert(G.particles, {
+                            x = e.x, y = e.y,
+                            vx = math.cos(pa) * sp,
+                            vy = math.sin(pa) * sp - 30,
+                            life = 0.3 + math.random() * 0.2, maxLife = 0.5,
+                            r = 255, g = 200 + math.random(55), b = 60 + math.random(40),
+                            size = 1.2 + math.random(), glow = true,
+                        })
+                    end
+                    -- 上升暗烟
+                    for kp = 1, 5 do
                         table.insert(G.particles, {
                             x = e.x + (math.random() - 0.5) * e.radius,
-                            y = e.y + (math.random() - 0.5) * e.radius,
-                            vx = math.cos(pa) * (15 + math.random() * 20),
-                            vy = -30 - math.random() * 40,
-                            life = 0.3 + math.random() * 0.2, maxLife = 0.5,
-                            r = 255, g = 120 + math.random(80), b = 20 + math.random(40),
-                            size = 1.5 + math.random(), glow = true,
+                            y = e.y - e.radius * 0.5,
+                            vx = (math.random() - 0.5) * 25,
+                            vy = -45 - math.random() * 30,
+                            life = 0.7 + math.random() * 0.4, maxLife = 1.1,
+                            r = 80, g = 50, b = 40,
+                            size = 4 + math.random() * 3, glow = false,
                         })
                     end
                     -- 燃烧致死
                     if e.hp <= 0 then
+                        local Combat = package.loaded["combat"]
+                        if Combat and Combat.TryInfernoExplosion then
+                            Combat.TryInfernoExplosion(e)
+                        end
                         G.killCount = G.killCount + 1
                         WM.OnEnemyKilled()
                         G.score = G.score + 50
@@ -459,13 +489,18 @@ function Enemy.UpdateEnemies(dt)
                             isPlayer = true,
                         })
                         if G.player.hp <= 0 then
-                            G.player.hp = 0
-                            G.player.alive = false
-                            G.gameState = G.STATE_DYING
-                            G.deathAnimTimer = 0
-                            G.deathZoomStart = G.camZoom
-                            G.deathSlowScale = 1.0
-                            G.PlaySfx(G.sndPlayerDeath, 0.6)
+                            local Combat = package.loaded["combat"]
+                            if Combat and Combat.TryPhoenixRevive and Combat.TryPhoenixRevive() then
+                                -- 复活
+                            else
+                                G.player.hp = 0
+                                G.player.alive = false
+                                G.gameState = G.STATE_DYING
+                                G.deathAnimTimer = 0
+                                G.deathZoomStart = G.camZoom
+                                G.deathSlowScale = 1.0
+                                G.PlaySfx(G.sndPlayerDeath, 0.6)
+                            end
                         end
                     end
                 end
